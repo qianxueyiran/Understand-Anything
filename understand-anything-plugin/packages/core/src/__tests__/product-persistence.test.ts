@@ -71,4 +71,50 @@ describe("product knowledge persistence", () => {
     invalid.concepts[0].evidence = [];
     expect(() => saveProductKnowledge(testRoot, invalid)).toThrow(/confirmed product concept/);
   });
+
+  it("sanitises product knowledge evidence paths without mutating input", () => {
+    const insideAreaPath = join(testRoot, "src/product/PlaybackArea.kt");
+    const insideConceptPath = join(testRoot, "src/player/PlayerViewModel.kt");
+    const outsideRulePath = join(tmpdir(), "outside-user-home/DisplayRules.kt");
+    const outsideDataFieldPath = join(tmpdir(), "outside-user-home/StreamDto.kt");
+    const knowledgeWithAbsolutePaths: ProductKnowledge = {
+      ...productKnowledge,
+      productAreas: [
+        {
+          ...productKnowledge.productAreas[0],
+          codeRefs: [{ filePath: insideAreaPath, reason: "业务区域入口" }],
+        },
+      ],
+      concepts: [
+        {
+          ...productKnowledge.concepts[0],
+          evidence: [{ filePath: insideConceptPath, reason: "构建标签" }],
+          displayRules: [
+            {
+              condition: "stream.label 存在",
+              result: "展示标签",
+              evidence: [{ filePath: outsideRulePath, reason: "展示规则" }],
+            },
+          ],
+          dataFields: [
+            {
+              name: "stream.label",
+              source: "api",
+              meaning: "服务端下发标签",
+              evidence: [{ filePath: outsideDataFieldPath, reason: "接口字段" }],
+            },
+          ],
+        },
+      ],
+    };
+
+    saveProductKnowledge(testRoot, knowledgeWithAbsolutePaths);
+
+    const loaded = loadProductKnowledge(testRoot);
+    expect(loaded?.productAreas[0].codeRefs[0].filePath).toBe("src/product/PlaybackArea.kt");
+    expect(loaded?.concepts[0].evidence[0].filePath).toBe("src/player/PlayerViewModel.kt");
+    expect(loaded?.concepts[0].displayRules[0].evidence[0].filePath).toBe("DisplayRules.kt");
+    expect(loaded?.concepts[0].dataFields[0].evidence[0].filePath).toBe("StreamDto.kt");
+    expect(knowledgeWithAbsolutePaths.concepts[0].evidence[0].filePath).toBe(insideConceptPath);
+  });
 });

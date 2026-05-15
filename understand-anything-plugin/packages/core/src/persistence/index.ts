@@ -2,7 +2,7 @@ import { readFileSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
 import { join, isAbsolute, relative, basename } from "node:path";
 import type { KnowledgeGraph, AnalysisMeta, ProjectConfig } from "../types.js";
 import type { FingerprintStore } from "../fingerprint.js";
-import type { ProductKnowledge } from "../product-knowledge.js";
+import type { EvidenceRef, ProductKnowledge } from "../product-knowledge.js";
 import { validateGraph } from "../schema.js";
 import { validateProductKnowledge } from "../product-knowledge.js";
 
@@ -69,6 +69,61 @@ function sanitiseFilePaths(
   return { ...graph, nodes: sanitisedNodes };
 }
 
+function sanitiseProductKnowledgeFilePaths(
+  knowledge: ProductKnowledge,
+  projectRoot: string,
+): ProductKnowledge {
+  return {
+    ...knowledge,
+    productAreas: knowledge.productAreas.map((area) => ({
+      ...area,
+      codeRefs: sanitiseEvidenceRefs(area.codeRefs, projectRoot),
+    })),
+    concepts: knowledge.concepts.map((concept) => ({
+      ...concept,
+      evidence: sanitiseEvidenceRefs(concept.evidence, projectRoot),
+      displayRules: concept.displayRules.map((rule) => ({
+        ...rule,
+        evidence: sanitiseEvidenceRefs(rule.evidence, projectRoot),
+      })),
+      dataFields: concept.dataFields.map((field) => ({
+        ...field,
+        evidence: sanitiseEvidenceRefs(field.evidence, projectRoot),
+      })),
+    })),
+  };
+}
+
+function sanitiseEvidenceRefs(
+  evidenceRefs: EvidenceRef[],
+  projectRoot: string,
+): EvidenceRef[] {
+  return evidenceRefs.map((evidence) => {
+    if (typeof evidence.filePath !== "string") return evidence;
+
+    return {
+      ...evidence,
+      filePath: sanitisePath(evidence.filePath, projectRoot),
+    };
+  });
+}
+
+function sanitisePath(filePath: string, projectRoot: string): string {
+  if (!isAbsolute(filePath)) {
+    return filePath;
+  }
+
+  const normalRoot = projectRoot.endsWith("/")
+    ? projectRoot
+    : projectRoot + "/";
+
+  if (filePath.startsWith(normalRoot) || filePath.startsWith(projectRoot)) {
+    return relative(projectRoot, filePath);
+  }
+
+  return basename(filePath);
+}
+
 export function saveGraph(projectRoot: string, graph: KnowledgeGraph): void {
   const dir = ensureDir(projectRoot);
 
@@ -121,9 +176,10 @@ export function saveProductKnowledge(
   }
 
   const dir = ensureDir(projectRoot);
+  const sanitised = sanitiseProductKnowledgeFilePaths(knowledge, projectRoot);
   writeFileSync(
     join(dir, PRODUCT_KNOWLEDGE_FILE),
-    JSON.stringify(knowledge, null, 2),
+    JSON.stringify(sanitised, null, 2),
     "utf-8",
   );
 }
