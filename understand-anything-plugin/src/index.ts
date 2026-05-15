@@ -3,7 +3,17 @@ export {
   formatContextForPrompt,
   type ChatContext,
 } from "./context-builder.js";
-export { buildChatPrompt } from "./understand-chat.js";
+export {
+  buildProductChatContext,
+  formatProductContextForPrompt,
+  type ProductChatContext,
+  type ProductChatContextInput,
+} from "./product-context-builder.js";
+export {
+  buildChatPrompt,
+  buildProductAwareChatPrompt,
+  type ProductAwareChatPromptInput,
+} from "./understand-chat.js";
 export {
   buildDiffContext,
   formatDiffAnalysis,
