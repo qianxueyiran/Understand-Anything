@@ -2,10 +2,13 @@ import { readFileSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
 import { join, isAbsolute, relative, basename } from "node:path";
 import type { KnowledgeGraph, AnalysisMeta, ProjectConfig } from "../types.js";
 import type { FingerprintStore } from "../fingerprint.js";
+import type { ProductKnowledge } from "../product-knowledge.js";
 import { validateGraph } from "../schema.js";
+import { validateProductKnowledge } from "../product-knowledge.js";
 
 const UA_DIR = ".understand-anything";
 const GRAPH_FILE = "knowledge-graph.json";
+const PRODUCT_KNOWLEDGE_FILE = "product-knowledge.json";
 const META_FILE = "meta.json";
 const FINGERPRINT_FILE = "fingerprints.json";
 const CONFIG_FILE = "config.json";
@@ -102,6 +105,55 @@ export function loadGraph(
   }
 
   return data as KnowledgeGraph;
+}
+
+export function saveProductKnowledge(
+  projectRoot: string,
+  knowledge: ProductKnowledge,
+  options?: { validate?: boolean },
+): void {
+  if (options?.validate !== false) {
+    const result = validateProductKnowledge(knowledge);
+    if (!result.success) {
+      throw new Error(`Invalid product knowledge: ${formatProductKnowledgeError(result.error)}`);
+    }
+    knowledge = result.data;
+  }
+
+  const dir = ensureDir(projectRoot);
+  writeFileSync(
+    join(dir, PRODUCT_KNOWLEDGE_FILE),
+    JSON.stringify(knowledge, null, 2),
+    "utf-8",
+  );
+}
+
+export function loadProductKnowledge(
+  projectRoot: string,
+  options?: { validate?: boolean },
+): ProductKnowledge | null {
+  const filePath = join(projectRoot, UA_DIR, PRODUCT_KNOWLEDGE_FILE);
+  if (!existsSync(filePath)) return null;
+
+  const data = JSON.parse(readFileSync(filePath, "utf-8"));
+
+  if (options?.validate !== false) {
+    const result = validateProductKnowledge(data);
+    if (!result.success) {
+      throw new Error(`Invalid product knowledge: ${formatProductKnowledgeError(result.error)}`);
+    }
+    return result.data;
+  }
+
+  return data as ProductKnowledge;
+}
+
+function formatProductKnowledgeError(error: string): string {
+  if (error.includes("confirmed concepts")) {
+    return `confirmed product concept validation failed: ${error}`;
+  }
+
+  return error;
 }
 
 export function saveMeta(projectRoot: string, meta: AnalysisMeta): void {
