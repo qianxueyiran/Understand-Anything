@@ -31,6 +31,24 @@ export {
 } from "./analyzer/normalize-graph.js";
 export { SearchEngine, type SearchResult, type SearchOptions } from "./search.js";
 export {
+  EvidenceRefSchema,
+  DisplayRuleSchema,
+  DataFieldRefSchema,
+  ProductAreaSchema,
+  ProductConceptSchema,
+  ProductKnowledgeSchema,
+  validateProductKnowledge,
+  searchProductKnowledge,
+  type EvidenceRef,
+  type DisplayRule,
+  type DataFieldRef,
+  type ProductArea,
+  type ProductConcept,
+  type ProductKnowledge,
+  type ProductKnowledgeValidationResult,
+  type ProductKnowledgeSearchResult,
+} from "./product-knowledge.js";
+export {
   getChangedFiles,
   isStale,
   mergeGraphUpdate,
