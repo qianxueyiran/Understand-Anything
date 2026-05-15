@@ -77,12 +77,16 @@ describe("product knowledge persistence", () => {
     const insideConceptPath = join(testRoot, "src/player/PlayerViewModel.kt");
     const outsideRulePath = join(tmpdir(), "outside-user-home/DisplayRules.kt");
     const outsideDataFieldPath = join(tmpdir(), "outside-user-home/StreamDto.kt");
+    const similarPrefixOutsidePath = join(`${testRoot}-outside`, "Secret.kt");
     const knowledgeWithAbsolutePaths: ProductKnowledge = {
       ...productKnowledge,
       productAreas: [
         {
           ...productKnowledge.productAreas[0],
-          codeRefs: [{ filePath: insideAreaPath, reason: "业务区域入口" }],
+          codeRefs: [
+            { filePath: insideAreaPath, reason: "业务区域入口" },
+            { filePath: similarPrefixOutsidePath, reason: "前缀相似但在项目外" },
+          ],
         },
       ],
       concepts: [
@@ -112,9 +116,13 @@ describe("product knowledge persistence", () => {
 
     const loaded = loadProductKnowledge(testRoot);
     expect(loaded?.productAreas[0].codeRefs[0].filePath).toBe("src/product/PlaybackArea.kt");
+    expect(loaded?.productAreas[0].codeRefs[1].filePath).toBe("Secret.kt");
     expect(loaded?.concepts[0].evidence[0].filePath).toBe("src/player/PlayerViewModel.kt");
     expect(loaded?.concepts[0].displayRules[0].evidence[0].filePath).toBe("DisplayRules.kt");
     expect(loaded?.concepts[0].dataFields[0].evidence[0].filePath).toBe("StreamDto.kt");
+    expect(knowledgeWithAbsolutePaths.productAreas[0].codeRefs[0].filePath).toBe(insideAreaPath);
     expect(knowledgeWithAbsolutePaths.concepts[0].evidence[0].filePath).toBe(insideConceptPath);
+    expect(knowledgeWithAbsolutePaths.concepts[0].displayRules[0].evidence[0].filePath).toBe(outsideRulePath);
+    expect(knowledgeWithAbsolutePaths.concepts[0].dataFields[0].evidence[0].filePath).toBe(outsideDataFieldPath);
   });
 });

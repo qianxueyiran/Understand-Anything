@@ -117,7 +117,7 @@ function sanitisePath(filePath: string, projectRoot: string): string {
     ? projectRoot
     : projectRoot + "/";
 
-  if (filePath.startsWith(normalRoot) || filePath.startsWith(projectRoot)) {
+  if (filePath === projectRoot || filePath.startsWith(normalRoot)) {
     return relative(projectRoot, filePath);
   }
 
