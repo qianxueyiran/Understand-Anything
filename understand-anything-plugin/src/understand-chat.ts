@@ -1,4 +1,5 @@
-import type { KnowledgeGraph, ProductKnowledge } from "@understand-anything/core";
+import type { ProductKnowledge } from "@understand-anything/core/product-knowledge";
+import type { KnowledgeGraph } from "@understand-anything/core/types";
 import { buildChatContext, formatContextForPrompt } from "./context-builder.js";
 import {
   buildProductChatContext,

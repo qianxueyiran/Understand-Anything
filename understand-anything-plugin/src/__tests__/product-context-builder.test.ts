@@ -1,10 +1,11 @@
 import { describe, expect, it } from "vitest";
-import type { GraphNode, KnowledgeGraph, ProductKnowledge } from "@understand-anything/core";
+import type { ProductKnowledge } from "@understand-anything/core/product-knowledge";
+import type { GraphNode, KnowledgeGraph } from "@understand-anything/core/types";
 import {
   buildProductChatContext,
   formatProductContextForPrompt,
 } from "../product-context-builder.js";
-import { buildProductAwareChatPrompt } from "../understand-chat.js";
+import { buildChatPrompt, buildProductAwareChatPrompt } from "../understand-chat.js";
 
 const makeNode = (
   overrides: Partial<GraphNode> & { id: string; name: string },
@@ -41,6 +42,14 @@ const graph: KnowledgeGraph = {
       summary: "Defines stream fields returned by the playback API.",
       tags: ["playback", "model"],
     }),
+    makeNode({
+      id: "function:player/PlayerViewModel.kt:buildStreamLabels",
+      name: "buildStreamLabels",
+      type: "function",
+      filePath: "player/PlayerViewModel.kt",
+      summary: "Builds the user-facing stream label list.",
+      tags: ["playback", "stream"],
+    }),
   ],
   edges: [],
   layers: [],
@@ -75,9 +84,8 @@ const productKnowledge: ProductKnowledge = {
       domainRefs: ["domain:playback"],
       codeRefs: [
         {
-          filePath: "player/PlayerActivity.kt",
-          nodeId: "file:player/PlayerActivity.kt",
-          reason: "播放页入口",
+          filePath: "player/PlayerViewModel.kt",
+          reason: "播放页 ViewModel 承载码流标签展示状态",
         },
       ],
     },
@@ -150,6 +158,19 @@ describe("buildProductChatContext", () => {
     );
     expect(ctx.domainNodes.map((node) => node.id)).toContain("domain:playback");
   });
+
+  it("matches filePath and symbol evidence to the specific function node", () => {
+    const ctx = buildProductChatContext({
+      graph,
+      domainGraph,
+      productKnowledge,
+      query: "播放页码流标签是什么意思",
+    });
+
+    expect(ctx.codeEvidenceNodes.map((node) => node.id)).toContain(
+      "function:player/PlayerViewModel.kt:buildStreamLabels",
+    );
+  });
 });
 
 describe("formatProductContextForPrompt", () => {
@@ -168,6 +189,51 @@ describe("formatProductContextForPrompt", () => {
     expect(formatted).toContain("stream.label");
     expect(formatted).toContain("PlayerViewModel.kt");
   });
+
+  it("deduplicates repeated evidence and caps rule and field output", () => {
+    const repeatedEvidence = {
+      filePath: "player/PlayerViewModel.kt",
+      symbol: "buildStreamLabels",
+      lineRange: [120, 168] as [number, number],
+      reason: "构建播放页可展示码流标签",
+    };
+    const ctx = buildProductChatContext({
+      graph,
+      domainGraph,
+      productKnowledge: {
+        ...productKnowledge,
+        concepts: [
+          {
+            ...productKnowledge.concepts[0],
+            businessRules: Array.from({ length: 7 }, (_, index) => `business-rule-${index + 1}`),
+            displayRules: Array.from({ length: 7 }, (_, index) => ({
+              condition: `display-condition-${index + 1}`,
+              result: `display-result-${index + 1}`,
+              evidence: [repeatedEvidence],
+            })),
+            dataFields: Array.from({ length: 7 }, (_, index) => ({
+              name: `field.${index + 1}`,
+              source: "api" as const,
+              meaning: `field meaning ${index + 1}`,
+              evidence: [repeatedEvidence],
+            })),
+            evidence: [repeatedEvidence, repeatedEvidence],
+          },
+        ],
+      },
+      query: "播放页码流标签是什么意思",
+    });
+
+    const formatted = formatProductContextForPrompt(ctx);
+
+    expect(formatted).toContain("business-rule-5");
+    expect(formatted).not.toContain("business-rule-6");
+    expect(formatted).toContain("display-condition-5");
+    expect(formatted).not.toContain("display-condition-6");
+    expect(formatted).toContain("field.5");
+    expect(formatted).not.toContain("field.6");
+    expect(formatted.match(/构建播放页可展示码流标签/g)).toHaveLength(1);
+  });
 });
 
 describe("buildProductAwareChatPrompt", () => {
@@ -179,5 +245,15 @@ describe("buildProductAwareChatPrompt", () => {
 
     expect(prompt).toContain("Code Components");
     expect(prompt).not.toContain("Product Knowledge");
+  });
+
+  it("falls back to the structural graph prompt when product knowledge has no query match", () => {
+    const input = {
+      graph,
+      productKnowledge,
+      query: "购物车优惠券是什么意思",
+    };
+
+    expect(buildProductAwareChatPrompt(input)).toBe(buildChatPrompt(graph, input.query));
   });
 });

@@ -1,11 +1,19 @@
 import {
   searchProductKnowledge,
   type EvidenceRef,
-  type GraphNode,
-  type KnowledgeGraph,
   type ProductKnowledge,
   type ProductKnowledgeSearchResult,
-} from "@understand-anything/core";
+} from "@understand-anything/core/product-knowledge";
+import {
+  type GraphNode,
+  type KnowledgeGraph,
+} from "@understand-anything/core/types";
+
+const PRODUCT_RESULT_PROMPT_LIMIT = 4;
+const BUSINESS_RULE_PROMPT_LIMIT = 5;
+const DISPLAY_RULE_PROMPT_LIMIT = 5;
+const DATA_FIELD_PROMPT_LIMIT = 5;
+const EVIDENCE_PROMPT_LIMIT = 6;
 
 export interface ProductChatContextInput {
   graph: KnowledgeGraph;
@@ -68,7 +76,9 @@ export function formatProductContextForPrompt(ctx: ProductChatContext): string {
 
   lines.push("## Product Knowledge");
   lines.push("");
-  for (const result of ctx.productResults) {
+  for (const result of ctx.productResults.slice(0, PRODUCT_RESULT_PROMPT_LIMIT)) {
+    const evidenceState = createEvidenceFormatState();
+
     lines.push(`### ${result.concept.name}`);
     lines.push(`- **Concept ID:** ${result.concept.id}`);
     if (result.area) {
@@ -81,25 +91,25 @@ export function formatProductContextForPrompt(ctx: ProductChatContext): string {
     }
     if (result.concept.businessRules.length > 0) {
       lines.push("- **Business Rules:**");
-      for (const rule of result.concept.businessRules) {
+      for (const rule of result.concept.businessRules.slice(0, BUSINESS_RULE_PROMPT_LIMIT)) {
         lines.push(`  - ${rule}`);
       }
     }
     if (result.concept.displayRules.length > 0) {
       lines.push("- **Display Rules:**");
-      for (const rule of result.concept.displayRules) {
+      for (const rule of result.concept.displayRules.slice(0, DISPLAY_RULE_PROMPT_LIMIT)) {
         lines.push(`  - If ${rule.condition}, then ${rule.result}`);
-        appendEvidence(lines, rule.evidence, "    ");
+        appendEvidence(lines, rule.evidence, "    ", evidenceState);
       }
     }
     if (result.concept.dataFields.length > 0) {
       lines.push("- **Data Fields:**");
-      for (const field of result.concept.dataFields) {
+      for (const field of result.concept.dataFields.slice(0, DATA_FIELD_PROMPT_LIMIT)) {
         lines.push(`  - ${field.name} (${field.source}): ${field.meaning}`);
-        appendEvidence(lines, field.evidence, "    ");
+        appendEvidence(lines, field.evidence, "    ", evidenceState);
       }
     }
-    appendEvidence(lines, result.concept.evidence, "  ");
+    appendEvidence(lines, result.concept.evidence, "  ", evidenceState);
     if (result.matchedText.length > 0) {
       lines.push(`- **Matched Text:** ${result.matchedText.join(" | ")}`);
     }
@@ -199,15 +209,10 @@ function collectNodesById(nodes: GraphNode[], ids: Set<string>): GraphNode[] {
 
 function collectEvidenceNodes(nodes: GraphNode[], evidenceRefs: EvidenceRef[]): GraphNode[] {
   const nodesById = new Map(nodes.map((node) => [node.id, node]));
-  const nodesByFilePath = new Map(
-    nodes
-      .filter((node): node is GraphNode & { filePath: string } => Boolean(node.filePath))
-      .map((node) => [node.filePath, node]),
-  );
   const collected = new Map<string, GraphNode>();
 
   for (const evidence of evidenceRefs) {
-    const node = findEvidenceNode(evidence, nodesById, nodesByFilePath);
+    const node = findEvidenceNode(evidence, nodes, nodesById);
     if (node) {
       collected.set(node.id, node);
     }
@@ -218,8 +223,8 @@ function collectEvidenceNodes(nodes: GraphNode[], evidenceRefs: EvidenceRef[]): 
 
 function findEvidenceNode(
   evidence: EvidenceRef,
+  nodes: GraphNode[],
   nodesById: Map<string, GraphNode>,
-  nodesByFilePath: Map<string, GraphNode>,
 ): GraphNode | undefined {
   if (evidence.nodeId) {
     const node = nodesById.get(evidence.nodeId);
@@ -228,22 +233,89 @@ function findEvidenceNode(
     }
   }
 
-  return evidence.filePath ? nodesByFilePath.get(evidence.filePath) : undefined;
+  if (!evidence.filePath) {
+    return undefined;
+  }
+
+  if (evidence.symbol) {
+    const symbolNode = nodes.find((node) =>
+      node.filePath === evidence.filePath
+      && (node.type === "function" || node.type === "class")
+      && (node.name === evidence.symbol || node.id.includes(`:${evidence.symbol}`))
+    );
+    if (symbolNode) {
+      return symbolNode;
+    }
+  }
+
+  return nodes.find((node) => node.filePath === evidence.filePath && node.type === "file");
 }
 
-function appendEvidence(lines: string[], evidenceRefs: EvidenceRef[], indent: string): void {
-  if (evidenceRefs.length === 0) {
+interface EvidenceFormatState {
+  seenKeys: Set<string>;
+  emittedCount: number;
+}
+
+function createEvidenceFormatState(): EvidenceFormatState {
+  return {
+    seenKeys: new Set(),
+    emittedCount: 0,
+  };
+}
+
+function appendEvidence(
+  lines: string[],
+  evidenceRefs: EvidenceRef[],
+  indent: string,
+  state: EvidenceFormatState,
+): void {
+  if (evidenceRefs.length === 0 || state.emittedCount >= EVIDENCE_PROMPT_LIMIT) {
+    return;
+  }
+
+  const formattedEvidence: string[] = [];
+  for (const evidence of evidenceRefs) {
+    if (state.emittedCount >= EVIDENCE_PROMPT_LIMIT) {
+      break;
+    }
+
+    const key = buildEvidenceKey(evidence);
+    if (state.seenKeys.has(key)) {
+      continue;
+    }
+
+    state.seenKeys.add(key);
+    state.emittedCount += 1;
+
+    const location = formatEvidenceLocation(evidence);
+    formattedEvidence.push(`${indent}  - ${location}: ${evidence.reason}`);
+  }
+
+  if (formattedEvidence.length === 0) {
     return;
   }
 
   lines.push(`${indent}- **Evidence:**`);
-  for (const evidence of evidenceRefs) {
-    const location = [
-      evidence.filePath,
-      evidence.nodeId,
-      evidence.symbol,
-      evidence.lineRange ? `lines ${evidence.lineRange[0]}-${evidence.lineRange[1]}` : undefined,
-    ].filter(Boolean).join(" ");
-    lines.push(`${indent}  - ${location}: ${evidence.reason}`);
-  }
+  lines.push(...formattedEvidence);
+}
+
+function buildEvidenceKey(evidence: EvidenceRef): string {
+  return [
+    evidence.nodeId ?? "",
+    evidence.filePath ?? "",
+    evidence.symbol ?? "",
+    evidence.lineRange ? `${evidence.lineRange[0]}-${evidence.lineRange[1]}` : "",
+    evidence.reason,
+  ].join("|");
+}
+
+function formatEvidenceLocation(evidence: EvidenceRef): string {
+  const location = [
+    evidence.filePath,
+    evidence.nodeId,
+    evidence.symbol,
+    evidence.lineRange ? `lines ${evidence.lineRange[0]}-${evidence.lineRange[1]}` : undefined,
+  ].filter(Boolean).join(" ");
+
+  return location || "unlocated evidence";
 }
