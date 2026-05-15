@@ -94,6 +94,43 @@ describe("product knowledge schema", () => {
     expect(result.error).toContain("confirmed");
   });
 
+  it("accepts uncertain concepts", () => {
+    const uncertain = structuredClone(sampleKnowledge) as any;
+    uncertain.concepts[0].confidence = "uncertain";
+    const result = validateProductKnowledge(uncertain);
+    expect(result.success).toBe(true);
+  });
+
+  it("accepts nodeId-only evidence", () => {
+    const nodeOnlyEvidence = structuredClone(sampleKnowledge) as any;
+    nodeOnlyEvidence.concepts[0].evidence = [
+      {
+        nodeId: "node:stream-quality-label",
+        reason: "来自图节点的产品概念证据",
+      },
+    ];
+    const result = validateProductKnowledge(nodeOnlyEvidence);
+    expect(result.success).toBe(true);
+  });
+
+  it("rejects evidence without filePath or nodeId", () => {
+    const invalid = structuredClone(sampleKnowledge) as any;
+    invalid.concepts[0].evidence = [
+      {
+        reason: "缺少可定位证据引用",
+      },
+    ];
+    const result = validateProductKnowledge(invalid);
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects data fields with unknown source kinds outside the enum", () => {
+    const invalid = structuredClone(sampleKnowledge) as any;
+    invalid.concepts[0].dataFields[0].source = "database-column";
+    const result = validateProductKnowledge(invalid);
+    expect(result.success).toBe(false);
+  });
+
   it("exports a zod schema for direct consumers", () => {
     const parsed = ProductKnowledgeSchema.parse(sampleKnowledge);
     expect(parsed.productAreas).toHaveLength(1);
@@ -115,6 +152,46 @@ describe("searchProductKnowledge", () => {
 
   it("returns an empty list for unrelated queries", () => {
     const results = searchProductKnowledge(sampleKnowledge, "购物车 优惠券");
+    expect(results).toEqual([]);
+  });
+
+  it("filters multi-token queries unless one concept covers every token", () => {
+    const multiConceptKnowledge: ProductKnowledge = {
+      ...sampleKnowledge,
+      productAreas: [
+        ...sampleKnowledge.productAreas,
+        {
+          id: "area:shopping-cart",
+          name: "购物车",
+          summary: "承载商品结算、优惠券使用和价格计算。",
+          domainRefs: ["domain:commerce"],
+          codeRefs: [],
+        },
+      ],
+      concepts: [
+        sampleKnowledge.concepts[0],
+        {
+          id: "concept:coupon",
+          name: "优惠券",
+          areaId: "area:shopping-cart",
+          meaning: "用户在购物车结算时可使用的优惠权益。",
+          userFacingTerms: ["优惠券"],
+          businessRules: ["优惠券只在购物车结算场景展示。"],
+          displayRules: [],
+          dataFields: [],
+          relatedConceptIds: [],
+          evidence: [
+            {
+              filePath: "commerce/CartViewModel.kt",
+              reason: "购物车优惠券展示逻辑",
+            },
+          ],
+          confidence: "confirmed",
+        },
+      ],
+    };
+
+    const results = searchProductKnowledge(multiConceptKnowledge, "播放页 优惠券");
     expect(results).toEqual([]);
   });
 });

@@ -2,11 +2,19 @@ import Fuse, { type IFuseOptions } from "fuse.js";
 import { z } from "zod";
 
 export const EvidenceRefSchema = z.object({
-  filePath: z.string().min(1),
+  filePath: z.string().min(1).optional(),
   nodeId: z.string().min(1).optional(),
   symbol: z.string().min(1).optional(),
   lineRange: z.tuple([z.number().int().positive(), z.number().int().positive()]).optional(),
   reason: z.string().min(1),
+}).superRefine((evidence, ctx) => {
+  if (!evidence.filePath && !evidence.nodeId) {
+    ctx.addIssue({
+      code: "custom",
+      message: "evidence must include at least filePath or nodeId",
+      path: ["filePath"],
+    });
+  }
 });
 
 export const DisplayRuleSchema = z.object({
@@ -17,7 +25,7 @@ export const DisplayRuleSchema = z.object({
 
 export const DataFieldRefSchema = z.object({
   name: z.string().min(1),
-  source: z.string().min(1),
+  source: z.enum(["api", "model", "enum", "resource", "local-state", "unknown"]),
   meaning: z.string().min(1),
   evidence: z.array(EvidenceRefSchema).default([]),
 });
@@ -41,7 +49,7 @@ export const ProductConceptSchema = z.object({
   dataFields: z.array(DataFieldRefSchema).default([]),
   relatedConceptIds: z.array(z.string().min(1)).default([]),
   evidence: z.array(EvidenceRefSchema).default([]),
-  confidence: z.enum(["confirmed", "inferred", "speculative"]),
+  confidence: z.enum(["confirmed", "inferred", "uncertain"]),
 }).superRefine((concept, ctx) => {
   if (concept.confidence === "confirmed" && concept.evidence.length === 0) {
     ctx.addIssue({
@@ -136,9 +144,11 @@ export function searchProductKnowledge(
 
   const documents = buildSearchDocuments(knowledge);
   const fuse = new Fuse(documents, PRODUCT_KNOWLEDGE_FUSE_OPTIONS);
-  const extendedQuery = trimmed.split(/\s+/).join(" | ");
+  const tokens = tokenizeQuery(trimmed);
+  const extendedQuery = tokens.join(" | ");
 
   return fuse.search(extendedQuery)
+    .filter((result) => documentMatchesTokens(result.item, tokens))
     .slice(0, limit)
     .map((result) => ({
       concept: result.item.concept,
@@ -182,11 +192,37 @@ function buildSearchDocuments(knowledge: ProductKnowledge): ProductKnowledgeSear
 }
 
 function collectMatchedText(document: ProductKnowledgeSearchDocument, query: string): string[] {
-  const tokens = query.split(/\s+/).filter(Boolean);
+  const tokens = tokenizeQuery(query);
   const matched = document.searchableText.filter((text) => {
     const lowerText = text.toLowerCase();
     return tokens.some((token) => lowerText.includes(token.toLowerCase()));
   });
 
   return matched.length > 0 ? Array.from(new Set(matched)) : document.searchableText.slice(0, 3);
+}
+
+function documentMatchesTokens(document: ProductKnowledgeSearchDocument, tokens: string[]): boolean {
+  if (tokens.length === 0) {
+    return false;
+  }
+  if (tokens.length === 1) {
+    return document.searchableText.some((text) => text.toLowerCase().includes(tokens[0].toLowerCase()));
+  }
+
+  const combinedText = document.searchableText.join(" ").toLowerCase();
+  return tokens.every((token) => combinedText.includes(token.toLowerCase()));
+}
+
+function tokenizeQuery(query: string): string[] {
+  return query
+    .trim()
+    .split(/\s+/)
+    .map(normalizeQueryToken)
+    .filter(Boolean);
+}
+
+function normalizeQueryToken(token: string): string {
+  return token
+    .replace(/^(怎么|如何)/, "")
+    .replace(/[?？。！!呢吗]+$/u, "");
 }
