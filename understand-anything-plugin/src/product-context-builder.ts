@@ -9,7 +9,7 @@ import {
   type KnowledgeGraph,
 } from "@understand-anything/core/types";
 
-const PRODUCT_RESULT_PROMPT_LIMIT = 4;
+const MAX_PRODUCT_RESULTS = 4;
 const BUSINESS_RULE_PROMPT_LIMIT = 5;
 const DISPLAY_RULE_PROMPT_LIMIT = 5;
 const DATA_FIELD_PROMPT_LIMIT = 5;
@@ -32,7 +32,7 @@ export interface ProductChatContext {
 
 export function buildProductChatContext(input: ProductChatContextInput): ProductChatContext {
   const productResults = input.productKnowledge
-    ? searchProductKnowledgeWithQueryVariants(input.productKnowledge, input.query, 6)
+    ? searchProductKnowledgeWithQueryVariants(input.productKnowledge, input.query, MAX_PRODUCT_RESULTS)
     : [];
 
   const domainIds = new Set<string>();
@@ -76,7 +76,7 @@ export function formatProductContextForPrompt(ctx: ProductChatContext): string {
 
   lines.push("## Product Knowledge");
   lines.push("");
-  for (const result of ctx.productResults.slice(0, PRODUCT_RESULT_PROMPT_LIMIT)) {
+  for (const result of ctx.productResults.slice(0, MAX_PRODUCT_RESULTS)) {
     const evidenceState = createEvidenceFormatState();
 
     lines.push(`### ${result.concept.name}`);

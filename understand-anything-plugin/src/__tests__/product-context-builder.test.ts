@@ -256,4 +256,55 @@ describe("buildProductAwareChatPrompt", () => {
 
     expect(buildProductAwareChatPrompt(input)).toBe(buildChatPrompt(graph, input.query));
   });
+
+  it("does not leak code evidence from product results beyond the prompt budget", () => {
+    const budgetGraph: KnowledgeGraph = {
+      ...graph,
+      nodes: [
+        ...graph.nodes,
+        makeNode({
+          id: "file:player/BudgetOnlyEvidence.kt",
+          name: "BudgetOnlyEvidence.kt",
+          filePath: "player/BudgetOnlyEvidence.kt",
+          summary: "Unique evidence that belongs only to the fifth product concept.",
+          tags: ["budget"],
+        }),
+      ],
+    };
+    const budgetKnowledge: ProductKnowledge = {
+      ...productKnowledge,
+      concepts: Array.from({ length: 5 }, (_, index) => ({
+        ...productKnowledge.concepts[0],
+        id: `concept:budget-${index + 1}`,
+        name: `预算概念${index + 1}`,
+        meaning: `共同查询词 budget-match 的第 ${index + 1} 个概念。`,
+        userFacingTerms: ["budget-match"],
+        businessRules: [`budget-match-rule-${index + 1}`],
+        displayRules: [],
+        dataFields: [],
+        evidence: [
+          {
+            filePath: index === 4
+              ? "player/BudgetOnlyEvidence.kt"
+              : "player/PlayerViewModel.kt",
+            reason: index === 4
+              ? "fifth-result-only-evidence"
+              : `included-evidence-${index + 1}`,
+          },
+        ],
+      })),
+    };
+
+    const prompt = buildProductAwareChatPrompt({
+      graph: budgetGraph,
+      domainGraph,
+      productKnowledge: budgetKnowledge,
+      query: "budget-match",
+    });
+
+    expect(prompt).toContain("预算概念4");
+    expect(prompt).not.toContain("预算概念5");
+    expect(prompt).not.toContain("BudgetOnlyEvidence.kt");
+    expect(prompt).not.toContain("fifth-result-only-evidence");
+  });
 });
