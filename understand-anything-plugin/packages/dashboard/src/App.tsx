@@ -122,7 +122,7 @@ function Dashboard({ accessToken }: { accessToken: string }) {
         if (config?.outputLanguage) setOutputLanguage(config.outputLanguage);
       })
       .catch(() => {});
-  }, []);
+  }, [accessToken]);
 
   useEffect(() => {
     fetch(dataUrl("knowledge-graph.json", accessToken))
@@ -155,7 +155,7 @@ function Dashboard({ accessToken }: { accessToken: string }) {
         console.error("Failed to load knowledge graph:", err);
         setLoadError(`Failed to load knowledge graph: ${err instanceof Error ? err.message : String(err)}`);
       });
-  }, [setGraph]);
+  }, [accessToken, setGraph]);
 
   useEffect(() => {
     fetch(dataUrl("diff-overlay.json", accessToken))
@@ -179,7 +179,7 @@ function Dashboard({ accessToken }: { accessToken: string }) {
         }
       })
       .catch(() => {});
-  }, [setDiffOverlay]);
+  }, [accessToken, setDiffOverlay]);
 
   useEffect(() => {
     fetch(dataUrl("domain-graph.json", accessToken))
@@ -197,7 +197,7 @@ function Dashboard({ accessToken }: { accessToken: string }) {
         }
       })
       .catch(() => {});
-  }, [setDomainGraph]);
+  }, [accessToken, setDomainGraph]);
 
   useEffect(() => {
     fetch(dataUrl("product-knowledge.json", accessToken))

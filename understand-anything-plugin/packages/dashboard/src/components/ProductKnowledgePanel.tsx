@@ -36,12 +36,13 @@ function findEvidenceTarget(
   if (!graph || evidence.length === 0) return null;
 
   for (const ref of evidence) {
-    if (ref.nodeId && graph.nodes.some((node) => node.id === ref.nodeId)) {
-      return ref.nodeId;
+    if (ref.nodeId) {
+      const node = graph.nodes.find((candidate) => candidate.id === ref.nodeId);
+      if (node?.filePath) {
+        return node.id;
+      }
     }
-  }
 
-  for (const ref of evidence) {
     if (!ref.filePath) continue;
     const node = graph.nodes.find((candidate) => candidate.filePath === ref.filePath);
     if (node) return node.id;
@@ -116,9 +117,9 @@ export default function ProductKnowledgePanel() {
 
                 {concept.userFacingTerms.length > 0 && (
                   <div className="mb-2 flex flex-wrap gap-1.5">
-                    {concept.userFacingTerms.map((term) => (
+                    {concept.userFacingTerms.map((term, index) => (
                       <span
-                        key={term}
+                        key={`${concept.id}-term-${index}`}
                         className="rounded-full bg-surface px-2 py-0.5 text-[11px] text-text-secondary border border-border-subtle"
                       >
                         {term}
