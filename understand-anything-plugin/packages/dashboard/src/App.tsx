@@ -207,14 +207,12 @@ function Dashboard({ accessToken }: { accessToken: string }) {
       })
       .then((data: unknown) => {
         if (!data) {
-          setProductKnowledge(null);
           return;
         }
         const result = validateProductKnowledge(data);
-        if (result.success) {
+        if (result.success && result.data) {
           setProductKnowledge(result.data);
         } else {
-          setProductKnowledge(null);
           console.warn(`[product-knowledge] validation failed: ${result.error}`);
         }
       })
