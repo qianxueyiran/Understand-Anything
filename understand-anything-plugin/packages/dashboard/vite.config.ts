@@ -250,6 +250,7 @@ export default defineConfig({
           const isProtectedEndpoint =
             pathname === "/knowledge-graph.json" ||
             pathname === "/domain-graph.json" ||
+            pathname === "/product-knowledge.json" ||
             pathname === "/diff-overlay.json" ||
             pathname === "/meta.json" ||
             pathname === "/config.json" ||
@@ -296,6 +297,8 @@ export default defineConfig({
               ? "diff-overlay.json"
               : pathname === "/meta.json"
               ? "meta.json"
+              : pathname === "/product-knowledge.json"
+              ? "product-knowledge.json"
               : pathname === "/domain-graph.json"
               ? "domain-graph.json"
               : "knowledge-graph.json";

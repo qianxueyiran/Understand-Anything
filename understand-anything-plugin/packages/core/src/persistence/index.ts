@@ -1,5 +1,5 @@
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
-import { join, isAbsolute, relative, basename } from "node:path";
+import { join, isAbsolute, relative, basename, normalize } from "node:path";
 import type { KnowledgeGraph, AnalysisMeta, ProjectConfig } from "../types.js";
 import type { FingerprintStore } from "../fingerprint.js";
 import type { EvidenceRef, ProductKnowledge } from "../product-knowledge.js";
@@ -98,14 +98,61 @@ function sanitiseEvidenceRefs(
   evidenceRefs: EvidenceRef[],
   projectRoot: string,
 ): EvidenceRef[] {
-  return evidenceRefs.map((evidence) => {
-    if (typeof evidence.filePath !== "string") return evidence;
+  return evidenceRefs.map((evidence) => sanitiseEvidenceRef(evidence, projectRoot));
+}
 
+function sanitiseEvidenceRef(
+  evidence: EvidenceRef,
+  projectRoot: string,
+): EvidenceRef {
+  if (typeof evidence.filePath !== "string") return evidence;
+
+  const filePath = sanitiseProductEvidencePath(evidence.filePath, projectRoot);
+  if (filePath) {
     return {
       ...evidence,
-      filePath: sanitisePath(evidence.filePath, projectRoot),
+      filePath,
     };
-  });
+  }
+
+  if (evidence.nodeId) {
+    const withoutFilePath = { ...evidence };
+    delete withoutFilePath.filePath;
+    return withoutFilePath;
+  }
+
+  throw new Error(`Invalid product knowledge evidence filePath: ${evidence.filePath}`);
+}
+
+function sanitiseProductEvidencePath(
+  filePath: string,
+  projectRoot: string,
+): string | null {
+  if (isUnsafeProductPathShape(filePath)) return null;
+
+  if (!isAbsolute(filePath)) {
+    return normalize(filePath).split(/[\\/]+/).join("/");
+  }
+
+  const safePath = sanitisePath(filePath, projectRoot);
+  if (isUnsafeProductPathShape(safePath)) return null;
+  return normalize(safePath).split(/[\\/]+/).join("/");
+}
+
+function isUnsafeProductPathShape(filePath: string): boolean {
+  if (!filePath.trim()) return true;
+  if (filePath.includes("\0")) return true;
+  if (filePath.includes("\\")) return true;
+  if (/^[A-Za-z]:/.test(filePath)) return true;
+  if (filePath.startsWith("//")) return true;
+
+  const normalised = normalize(filePath);
+  return (
+    normalised === "." ||
+    normalised === ".." ||
+    normalised.startsWith("../") ||
+    normalised.includes("/../")
+  );
 }
 
 function sanitisePath(filePath: string, projectRoot: string): string {

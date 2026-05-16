@@ -125,4 +125,49 @@ describe("product knowledge persistence", () => {
     expect(knowledgeWithAbsolutePaths.concepts[0].displayRules[0].evidence[0].filePath).toBe(outsideRulePath);
     expect(knowledgeWithAbsolutePaths.concepts[0].dataFields[0].evidence[0].filePath).toBe(outsideDataFieldPath);
   });
+
+  it("rejects unsafe relative product evidence paths without node fallback", () => {
+    const unsafe = structuredClone(productKnowledge);
+    unsafe.concepts[0].evidence = [
+      { filePath: "../secret/PlaybackRules.kt", reason: "逃逸路径" },
+    ];
+
+    expect(() => saveProductKnowledge(testRoot, unsafe)).toThrow(/Invalid product knowledge evidence filePath/);
+  });
+
+  it("drops unsafe product evidence file paths when nodeId is available", () => {
+    const withNodeFallback = structuredClone(productKnowledge);
+    withNodeFallback.productAreas[0].codeRefs = [
+      {
+        filePath: "C:/Users/alice/company/PlaybackArea.kt",
+        nodeId: "file:src/product/PlaybackArea.kt",
+        reason: "Windows 绝对路径但有节点证据",
+      },
+    ];
+    withNodeFallback.concepts[0].displayRules = [
+      {
+        condition: "stream.label 存在",
+        result: "展示标签",
+        evidence: [
+          {
+            filePath: "src\\player\\Rules.kt",
+            nodeId: "function:src/player/Rules.kt:buildRules",
+            reason: "反斜杠路径但有节点证据",
+          },
+        ],
+      },
+    ];
+
+    saveProductKnowledge(testRoot, withNodeFallback);
+
+    const loaded = loadProductKnowledge(testRoot);
+    expect(loaded?.productAreas[0].codeRefs[0]).toEqual({
+      nodeId: "file:src/product/PlaybackArea.kt",
+      reason: "Windows 绝对路径但有节点证据",
+    });
+    expect(loaded?.concepts[0].displayRules[0].evidence[0]).toEqual({
+      nodeId: "function:src/player/Rules.kt:buildRules",
+      reason: "反斜杠路径但有节点证据",
+    });
+  });
 });
