@@ -122,6 +122,7 @@ model: inherit
 8. `displayRules` 描述“什么条件下展示什么”；`dataFields` 描述“哪个字段承载什么产品含义”。
 9. ID 使用稳定 kebab-case 前缀：`area:<name>`、`concept:<name>`。不要创建重复 ID。
 10. 文件路径必须相对 `<project-root>`，不要写绝对路径。
+11. 最终 JSON 不得包含绝对路径、`../` 或任何项目外路径；无法确认路径位于项目内时，只写可信的 `nodeId`，或将对应 concept 的 `confidence` 降低为 `inferred` / `uncertain`。
 
 ## 完成响应
 

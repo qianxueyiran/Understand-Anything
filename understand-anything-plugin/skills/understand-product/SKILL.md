@@ -105,6 +105,14 @@ $PROJECT_ROOT/.understand-anything/intermediate/product-knowledge.json
 - 每个 `confidence` 为 `confirmed` 的 concept 至少包含一条 `evidence`
 - 每条 evidence 至少能定位到 `filePath` 或 `nodeId`
 - `displayRules`、`dataFields` 如存在，必须保持数组结构
+- 保存前必须优先调用 core schema/persistence 提供的验证或保存能力（例如 `ProductKnowledge` schema validation / persistence save path），让 core 层统一做结构和 evidence 校验；只有当前运行环境无法直接调用这些能力时，才允许使用下面的硬规则手工验证。
+- 必须递归校验所有 evidence/code reference 路径，覆盖：
+  - `productAreas[].codeRefs[]`
+  - `concepts[].evidence[]`
+  - `concepts[].displayRules[].evidence[]`
+  - `concepts[].dataFields[].evidence[]`
+- 对上述对象里的每个 `filePath` 应用同一组硬规则：必须是项目内相对路径；禁止绝对路径；禁止空字符串；禁止包含 `..` 路径段；禁止反斜杠；禁止 Windows 盘符或 UNC 路径等可疑路径；规范化后仍必须位于 `$PROJECT_ROOT` 内。
+- 如果 evidence 无法确认项目内路径，但可以确认知识图谱节点，只保留 `nodeId` 并删除/拒绝不可信 `filePath`；如果既没有可信 `filePath` 也没有 `nodeId`，该 evidence 验证失败。
 
 验证失败时停止保存，并保留现有 `.understand-anything/product-knowledge.json` 不变。向用户说明失败原因，让用户可重新运行。
 
