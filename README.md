@@ -57,6 +57,10 @@ Navigate your codebase as an interactive knowledge graph — every file, functio
 
 Switch to the domain view and see how your code maps to real business processes — domains, flows, and steps laid out as a horizontal graph.
 
+### Explain product knowledge
+
+Generate product-facing knowledge such as page elements, labels, display rules, data fields, and code evidence. This is useful for questions like "How does the playback page show stream quality labels, and what do those labels mean?"
+
 ### Analyze knowledge bases
 
 Point `/understand-knowledge` at a [Karpathy-pattern LLM wiki](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f) and get a force-directed knowledge graph with community clustering. The deterministic parser extracts wikilinks and categories from `index.md`, then LLM agents discover implicit relationships, extract entities, and surface claims — turning your wiki into a navigable graph of interconnected ideas.
@@ -152,6 +156,9 @@ An interactive web dashboard opens with your codebase visualized as a graph — 
 
 # Extract business domain knowledge (domains, flows, steps)
 /understand-domain
+
+# Extract product-facing knowledge for PM questions
+/understand-product
 
 # Analyze a Karpathy-pattern LLM wiki knowledge base
 /understand-knowledge ~/path/to/wiki
