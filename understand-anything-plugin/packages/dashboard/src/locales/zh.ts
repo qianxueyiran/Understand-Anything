@@ -269,4 +269,14 @@ export const zh = {
   },
 };
 
+export const productKnowledge = {
+  title: "产品知识",
+  productAreas: "产品区域",
+  productConcepts: "产品概念",
+  searchPlaceholder: "搜索产品概念...",
+  displayRules: "展示规则",
+  viewEvidence: "查看证据",
+  noResults: "没有匹配的概念。",
+};
+
 export default zh;

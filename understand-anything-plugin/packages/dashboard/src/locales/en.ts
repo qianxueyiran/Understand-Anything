@@ -269,4 +269,14 @@ export const en = {
   },
 };
 
+export const productKnowledge = {
+  title: "Product Knowledge",
+  productAreas: "Product areas",
+  productConcepts: "Product concepts",
+  searchPlaceholder: "Search product concepts...",
+  displayRules: "Display rules",
+  viewEvidence: "View evidence",
+  noResults: "No matching concepts.",
+};
+
 export default en;

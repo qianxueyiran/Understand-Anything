@@ -1,5 +1,6 @@
 import { useEffect, useState, useMemo, useCallback, lazy, Suspense } from "react";
 import { validateGraph } from "@understand-anything/core/schema";
+import { validateProductKnowledge } from "@understand-anything/core/product-knowledge";
 import type { GraphIssue } from "@understand-anything/core/schema";
 import { useDashboardStore } from "./store";
 import GraphView from "./components/GraphView";
@@ -13,6 +14,7 @@ import FilterPanel from "./components/FilterPanel";
 import ExportMenu from "./components/ExportMenu";
 import PersonaSelector from "./components/PersonaSelector";
 import ProjectOverview from "./components/ProjectOverview";
+import ProductKnowledgePanel from "./components/ProductKnowledgePanel";
 import FileExplorer from "./components/FileExplorer";
 import WarningBanner from "./components/WarningBanner";
 import TokenGate from "./components/TokenGate";
@@ -43,6 +45,7 @@ function dataUrl(fileName: string, token: string | null): string {
     const envMap: Record<string, string | undefined> = {
       "knowledge-graph.json": import.meta.env.VITE_GRAPH_URL,
       "domain-graph.json": import.meta.env.VITE_DOMAIN_GRAPH_URL,
+      "product-knowledge.json": import.meta.env.VITE_PRODUCT_KNOWLEDGE_URL,
       "meta.json": import.meta.env.VITE_META_URL,
       "diff-overlay.json": import.meta.env.VITE_DIFF_OVERLAY_URL,
       "config.json": import.meta.env.VITE_CONFIG_URL,
@@ -99,6 +102,7 @@ function App() {
 function Dashboard({ accessToken }: { accessToken: string }) {
   const setGraph = useDashboardStore((s) => s.setGraph);
   const setDomainGraph = useDashboardStore((s) => s.setDomainGraph);
+  const setProductKnowledge = useDashboardStore((s) => s.setProductKnowledge);
   const setDiffOverlay = useDashboardStore((s) => s.setDiffOverlay);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [graphIssues, setGraphIssues] = useState<GraphIssue[]>([]);
@@ -194,6 +198,28 @@ function Dashboard({ accessToken }: { accessToken: string }) {
       })
       .catch(() => {});
   }, [setDomainGraph]);
+
+  useEffect(() => {
+    fetch(dataUrl("product-knowledge.json", accessToken))
+      .then((res) => {
+        if (!res.ok) return null;
+        return res.json();
+      })
+      .then((data: unknown) => {
+        if (!data) {
+          setProductKnowledge(null);
+          return;
+        }
+        const result = validateProductKnowledge(data);
+        if (result.success) {
+          setProductKnowledge(result.data);
+        } else {
+          setProductKnowledge(null);
+          console.warn(`[product-knowledge] validation failed: ${result.error}`);
+        }
+      })
+      .catch(() => {});
+  }, [accessToken, setProductKnowledge]);
 
   return (
     <I18nProvider language={outputLanguage ?? "en"}>
@@ -381,7 +407,12 @@ function DashboardContent({
           <LearnPanel />
         </Suspense>
       )}
-      {!selectedNodeId && !isLearnMode && <ProjectOverview />}
+      {!selectedNodeId && !isLearnMode && (
+        <>
+          <ProjectOverview />
+          <ProductKnowledgePanel />
+        </>
+      )}
     </>
   );
 

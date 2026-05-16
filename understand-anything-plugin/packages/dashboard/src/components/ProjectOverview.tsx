@@ -1,10 +1,14 @@
 import { useDashboardStore } from "../store";
 import { useI18n } from "../contexts/I18nContext";
+import { productKnowledge as enProductKnowledge } from "../locales/en";
+import { productKnowledge as zhProductKnowledge } from "../locales/zh";
 
 export default function ProjectOverview() {
   const graph = useDashboardStore((s) => s.graph);
+  const productKnowledge = useDashboardStore((s) => s.productKnowledge);
   const startTour = useDashboardStore((s) => s.startTour);
-  const { t } = useI18n();
+  const { t, localeKey } = useI18n();
+  const productKnowledgeLabels = localeKey === "zh" ? zhProductKnowledge : enProductKnowledge;
 
   if (!graph) {
     return (
@@ -78,6 +82,18 @@ export default function ProjectOverview() {
           <div className="text-2xl font-mono font-medium text-accent">{Object.keys(typeCounts).length}</div>
           <div className="text-[11px] text-text-muted uppercase tracking-wider mt-1">{t.projectOverview.types}</div>
         </div>
+        {productKnowledge && (
+          <>
+            <div className="bg-elevated rounded-lg p-3 border border-border-subtle">
+              <div className="text-2xl font-mono font-medium text-accent">{productKnowledge.productAreas.length}</div>
+              <div className="text-[11px] text-text-muted uppercase tracking-wider mt-1">{productKnowledgeLabels.productAreas}</div>
+            </div>
+            <div className="bg-elevated rounded-lg p-3 border border-border-subtle">
+              <div className="text-2xl font-mono font-medium text-accent">{productKnowledge.concepts.length}</div>
+              <div className="text-[11px] text-text-muted uppercase tracking-wider mt-1">{productKnowledgeLabels.productConcepts}</div>
+            </div>
+          </>
+        )}
       </div>
 
       {/* File Types breakdown */}
