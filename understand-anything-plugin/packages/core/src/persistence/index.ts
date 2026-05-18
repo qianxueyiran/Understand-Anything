@@ -257,7 +257,7 @@ function sanitiseProductEvidenceFilePath(
     return rest;
   }
 
-  throw new Error(`Unsafe product evidence filePath: ${evidence.filePath}`);
+  throw new Error(`Invalid product evidence filePath: ${evidence.filePath}`);
 }
 
 function getSafeProductEvidenceFilePath(
@@ -285,7 +285,7 @@ function getSafeProductEvidenceFilePath(
 }
 
 function hasWindowsPathSyntax(filePath: string): boolean {
-  return /^[a-zA-Z]:[\\/]/.test(filePath) || filePath.startsWith("\\\\");
+  return /^[a-zA-Z]:/.test(filePath) || filePath.startsWith("\\\\");
 }
 
 function isUnsafeRelativeProductPath(filePath: string): boolean {

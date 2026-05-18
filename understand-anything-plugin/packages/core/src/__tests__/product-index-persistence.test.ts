@@ -164,6 +164,7 @@ describe("product index persistence", () => {
     const unsafePaths = [
       "/tmp/outside/PlayerActivity.kt",
       "C:\\repo\\player\\PlayerActivity.kt",
+      "C:repo/player/PlayerActivity.kt",
       "app\\src\\main\\PlayerActivity.kt",
       "../outside/PlayerActivity.kt",
     ];
@@ -181,6 +182,24 @@ describe("product index persistence", () => {
     }
   });
 
+  it("drops drive-relative Windows evidence file paths when nodeId is present", () => {
+    const index = cloneIndex({
+      evidence: [
+        {
+          ...sampleIndex.evidence[0],
+          filePath: "C:repo/player/PlayerActivity.kt",
+        },
+      ],
+    });
+
+    saveProductIndex(testRoot, index);
+
+    expect(savedJson().evidence[0]).not.toHaveProperty("filePath");
+    expect(loadProductIndex(testRoot)?.evidence[0].nodeId).toBe(
+      sampleIndex.evidence[0].nodeId,
+    );
+  });
+
   it("throws for unsafe evidence file paths without nodeId fallback", () => {
     const index = cloneIndex({
       evidence: [
@@ -193,7 +212,24 @@ describe("product index persistence", () => {
     });
 
     expect(() => saveProductIndex(testRoot, index)).toThrow(
-      /Unsafe product evidence filePath/,
+      /Invalid product evidence filePath/,
+    );
+    expect(existsSync(productIndexPath)).toBe(false);
+  });
+
+  it("throws for drive-relative Windows evidence file paths without nodeId fallback", () => {
+    const index = cloneIndex({
+      evidence: [
+        {
+          ...sampleIndex.evidence[0],
+          filePath: "C:repo/player/PlayerActivity.kt",
+          nodeId: undefined,
+        },
+      ],
+    });
+
+    expect(() => saveProductIndex(testRoot, index)).toThrow(
+      /Invalid product evidence filePath/,
     );
     expect(existsSync(productIndexPath)).toBe(false);
   });
