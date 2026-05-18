@@ -7,7 +7,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import type { KnowledgeGraph } from "@understand-anything/core";
 import { runProductIndexCli } from "../product-index-cli.js";
 
@@ -39,17 +39,33 @@ const graph: KnowledgeGraph = {
   tour: [],
 };
 
+function writeGraph(nextGraph: KnowledgeGraph): void {
+  writeFileSync(
+    join(testRoot, ".understand-anything", "knowledge-graph.json"),
+    JSON.stringify(nextGraph, null, 2),
+    "utf-8",
+  );
+}
+
+function readSignals(): Array<{ filePath?: string; nodeId: string }> {
+  const content = readFileSync(
+    join(testRoot, ".understand-anything", "product-signals.jsonl"),
+    "utf-8",
+  ).trim();
+  return content
+    ? content
+        .split("\n")
+        .map((line) => JSON.parse(line) as { filePath?: string; nodeId: string })
+    : [];
+}
+
 describe("product-index CLI", () => {
   beforeEach(() => {
     if (existsSync(testRoot)) {
       rmSync(testRoot, { recursive: true });
     }
     mkdirSync(join(testRoot, ".understand-anything"), { recursive: true });
-    writeFileSync(
-      join(testRoot, ".understand-anything", "knowledge-graph.json"),
-      JSON.stringify(graph, null, 2),
-      "utf-8",
-    );
+    writeGraph(graph);
   });
 
   afterEach(() => {
@@ -87,5 +103,74 @@ describe("product-index CLI", () => {
     await expect(
       runProductIndexCli([testRoot, "--platform", "android", "--fast"]),
     ).rejects.toThrow(/knowledge-graph\.json not found/);
+  });
+
+  it("rejects unknown CLI flags", async () => {
+    await expect(runProductIndexCli([testRoot, "--unknown"])).rejects.toThrow(
+      /Unknown option: --unknown/,
+    );
+  });
+
+  it("rejects value flags with missing values", async () => {
+    await expect(runProductIndexCli([testRoot, "--platform"])).rejects.toThrow(
+      /Missing value for --platform/,
+    );
+    await expect(
+      runProductIndexCli([testRoot, "--platform", "--fast"]),
+    ).rejects.toThrow(/Missing value for --platform/);
+  });
+
+  it("rejects numeric flags unless they are positive integers", async () => {
+    for (const value of ["abc", "Infinity", "0", "-1", "1.5"]) {
+      await expect(
+        runProductIndexCli([testRoot, "--max-depth", value]),
+      ).rejects.toThrow(/--max-depth must be a positive integer/);
+    }
+  });
+
+  it("writes project-relative signal paths for in-project absolute file paths", async () => {
+    const filePath = resolve(testRoot, "player/PlayerActivity.kt");
+    writeGraph({
+      ...graph,
+      nodes: [{ ...graph.nodes[0], filePath }],
+    });
+
+    await runProductIndexCli([testRoot, "--platform", "android", "--fast"]);
+
+    expect(readSignals()[0].filePath).toBe("player/PlayerActivity.kt");
+  });
+
+  it("does not write unsafe signal file paths to the sidecar", async () => {
+    const unsafePaths = [
+      "/tmp/outside/PlayerActivity.kt",
+      "C:\\repo\\player\\PlayerActivity.kt",
+      "\\\\server\\share\\PlayerActivity.kt",
+      "app\\src\\main\\PlayerActivity.kt",
+      "src\u0000/player/PlayerActivity.kt",
+      "src//PlayerActivity.kt",
+      "../outside/PlayerActivity.kt",
+    ];
+
+    writeGraph({
+      ...graph,
+      nodes: unsafePaths.map((filePath, index) => ({
+        ...graph.nodes[0],
+        id: `class:unsafe-${index}:PlayerActivity`,
+        filePath,
+      })),
+    });
+
+    await runProductIndexCli([testRoot, "--platform", "android", "--fast"]);
+
+    const signalContent = readFileSync(
+      join(testRoot, ".understand-anything", "product-signals.jsonl"),
+      "utf-8",
+    );
+    for (const filePath of unsafePaths) {
+      expect(signalContent).not.toContain(filePath);
+    }
+    expect(readSignals().every((signal) => signal.filePath === undefined)).toBe(
+      true,
+    );
   });
 });

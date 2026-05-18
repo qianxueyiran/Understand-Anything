@@ -1,11 +1,12 @@
 import { existsSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { isAbsolute, relative, resolve, join } from "node:path";
 import {
   buildDeterministicProductIndex,
   buildProductSignals,
   loadDomainGraph,
   loadGraph,
   saveProductIndex,
+  type ProductSignal,
   type ProductProfileOptions,
 } from "@understand-anything/core";
 
@@ -53,7 +54,10 @@ export async function runProductIndexCli(
     hubDegreeThreshold: options.hubDegreeThreshold,
   };
 
-  const signals = buildProductSignals(graph, builderOptions);
+  const signals = sanitiseProductSignals(
+    buildProductSignals(graph, builderOptions),
+    options.projectRoot,
+  );
   const index = buildDeterministicProductIndex(
     graph,
     domainGraph,
@@ -100,6 +104,25 @@ interface ParsedArgs {
   hubDegreeThreshold: number;
 }
 
+const VALUE_FLAGS = new Set([
+  "--platform",
+  "--entry-patterns",
+  "--max-depth",
+  "--max-nodes-per-topic",
+  "--max-frontier-per-depth",
+  "--max-evidence-per-topic",
+  "--hub-degree-threshold",
+]);
+
+const BOOLEAN_FLAGS = new Set(["--fast"]);
+const NUMERIC_FLAGS = new Set([
+  "--max-depth",
+  "--max-nodes-per-topic",
+  "--max-frontier-per-depth",
+  "--max-evidence-per-topic",
+  "--hub-degree-threshold",
+]);
+
 function parseArgs(argv: string[]): ParsedArgs {
   const projectRoot = argv[0];
   if (!projectRoot) {
@@ -108,54 +131,149 @@ function parseArgs(argv: string[]): ParsedArgs {
     );
   }
 
-  const entryPatternsValue = getFlagValue(argv, "--entry-patterns", "");
+  const values = new Map<string, string>();
+  const booleans = new Set<string>();
+
+  for (let index = 1; index < argv.length; index += 1) {
+    const item = argv[index];
+    if (!item.startsWith("--")) {
+      throw new Error(`Unexpected argument: ${item}`);
+    }
+
+    if (BOOLEAN_FLAGS.has(item)) {
+      booleans.add(item);
+      continue;
+    }
+
+    if (!VALUE_FLAGS.has(item)) {
+      throw new Error(`Unknown option: ${item}`);
+    }
+
+    const value = argv[index + 1];
+    if (!value || value.startsWith("--")) {
+      throw new Error(`Missing value for ${item}`);
+    }
+
+    values.set(item, value);
+    index += 1;
+  }
+
+  const entryPatternsValue = values.get("--entry-patterns") ?? "";
 
   return {
     projectRoot,
-    platform: getFlagValue(argv, "--platform", "android"),
-    fast: argv.includes("--fast"),
+    platform: values.get("--platform") ?? "android",
+    fast: booleans.has("--fast"),
     entryPatterns: entryPatternsValue
       ? entryPatternsValue
           .split(",")
           .map((item) => item.trim())
           .filter(Boolean)
       : undefined,
-    maxDepth: getNumberFlagValue(argv, "--max-depth", 8),
-    maxNodesPerTopic: getNumberFlagValue(argv, "--max-nodes-per-topic", 240),
+    maxDepth: getNumberFlagValue(values, "--max-depth", 8),
+    maxNodesPerTopic: getNumberFlagValue(values, "--max-nodes-per-topic", 240),
     maxFrontierPerDepth: getNumberFlagValue(
-      argv,
+      values,
       "--max-frontier-per-depth",
       40,
     ),
     maxEvidencePerTopic: getNumberFlagValue(
-      argv,
+      values,
       "--max-evidence-per-topic",
       50,
     ),
     hubDegreeThreshold: getNumberFlagValue(
-      argv,
+      values,
       "--hub-degree-threshold",
       80,
     ),
   };
 }
 
-function getFlagValue(argv: string[], flag: string, fallback: string): string {
-  const index = argv.indexOf(flag);
-  return index >= 0 && argv[index + 1] ? argv[index + 1] : fallback;
-}
-
 function getNumberFlagValue(
-  argv: string[],
+  values: Map<string, string>,
   flag: string,
   fallback: number,
 ): number {
-  const raw = getFlagValue(argv, flag, String(fallback));
+  if (!NUMERIC_FLAGS.has(flag)) {
+    throw new Error(`Internal error: ${flag} is not a numeric flag`);
+  }
+
+  const raw = values.get(flag) ?? String(fallback);
   const value = Number(raw);
-  if (!Number.isFinite(value)) {
-    throw new Error(`Invalid numeric value for ${flag}: ${raw}`);
+  if (!Number.isInteger(value) || value <= 0) {
+    throw new Error(`${flag} must be a positive integer: ${raw}`);
   }
   return value;
+}
+
+function sanitiseProductSignals(
+  signals: ProductSignal[],
+  projectRoot: string,
+): ProductSignal[] {
+  return signals.map((signal) => sanitiseProductSignal(signal, projectRoot));
+}
+
+function sanitiseProductSignal(
+  signal: ProductSignal,
+  projectRoot: string,
+): ProductSignal {
+  if (typeof signal.filePath !== "string") {
+    return signal;
+  }
+
+  const safeFilePath = getSafeSignalFilePath(signal.filePath, projectRoot);
+  if (safeFilePath) {
+    return safeFilePath === signal.filePath
+      ? signal
+      : { ...signal, filePath: safeFilePath };
+  }
+
+  if (signal.nodeId) {
+    const { filePath: _filePath, ...rest } = signal;
+    return rest;
+  }
+
+  throw new Error(`Invalid product signal filePath: ${signal.filePath}`);
+}
+
+function getSafeSignalFilePath(
+  filePath: string,
+  projectRoot: string,
+): string | null {
+  if (
+    hasWindowsPathSyntax(filePath) ||
+    filePath.includes("\\") ||
+    filePath.includes("\0")
+  ) {
+    return null;
+  }
+
+  if (isAbsolute(filePath)) {
+    const relativePath = relative(resolve(projectRoot), filePath);
+    if (!relativePath || isUnsafeRelativePath(relativePath)) {
+      return null;
+    }
+    return relativePath;
+  }
+
+  if (isUnsafeRelativePath(filePath)) {
+    return null;
+  }
+
+  return filePath;
+}
+
+function hasWindowsPathSyntax(filePath: string): boolean {
+  return /^[a-zA-Z]:/.test(filePath) || filePath.startsWith("\\\\");
+}
+
+function isUnsafeRelativePath(filePath: string): boolean {
+  const parts = filePath.split("/");
+  return (
+    filePath.startsWith("/") ||
+    parts.some((part) => part === "" || part === "..")
+  );
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
