@@ -20,19 +20,39 @@ const LAYER_PATTERNS: Array<{ patterns: string[]; layerName: string; description
     description: "HTTP endpoints, route handlers, and API controllers",
   },
   {
-    patterns: ["service", "usecase", "use-case", "business"],
-    layerName: "Service Layer",
-    description: "Business logic and application services",
+    patterns: ["activity", "fragment", "compose", "viewmodel", "screen", "layout", "view", "ui", "adapter"],
+    layerName: "UI Layer",
+    description: "User interface components, screens, lifecycle containers, and UI binding code",
   },
   {
-    patterns: ["model", "entity", "schema", "database", "db", "migration", "repository", "repo"],
+    patterns: ["presenter"],
+    layerName: "Presentation Logic",
+    description: "Presentation coordination logic such as MVP presenters",
+  },
+  {
+    patterns: ["contract", "dto", "request", "response", "type", "types", "interface", "interfaces"],
+    layerName: "Interface / Types",
+    description: "Type definitions, contracts, request/response models, and interface boundaries",
+  },
+  {
+    patterns: ["service", "usecase", "use-case", "interactor", "domain", "business"],
+    layerName: "Service Layer",
+    description: "Business logic, domain actions, use cases, and application services",
+  },
+  {
+    patterns: ["model", "entity", "schema", "database", "db", "migration", "repository", "repo", "datasource", "data-source", "dao", "room"],
     layerName: "Data Layer",
     description: "Data models, database access, and persistence",
   },
   {
-    patterns: ["component", "view", "page", "screen", "layout", "widget", "ui"],
-    layerName: "UI Layer",
-    description: "User interface components and views",
+    patterns: ["di", "hilt", "dagger", "inject"],
+    layerName: "DI / Configuration",
+    description: "Dependency injection setup and application wiring",
+  },
+  {
+    patterns: ["navigation", "navgraph", "router"],
+    layerName: "Navigation",
+    description: "Navigation graphs, routing tables, and screen transition wiring",
   },
   {
     patterns: ["middleware", "interceptor", "guard", "filter", "pipe"],
