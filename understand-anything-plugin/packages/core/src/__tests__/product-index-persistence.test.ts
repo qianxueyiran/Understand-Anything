@@ -166,6 +166,8 @@ describe("product index persistence", () => {
       "C:\\repo\\player\\PlayerActivity.kt",
       "C:repo/player/PlayerActivity.kt",
       "app\\src\\main\\PlayerActivity.kt",
+      "src\u0000/player/PlayerActivity.kt",
+      "src//player.kt",
       "../outside/PlayerActivity.kt",
     ];
 
@@ -232,5 +234,26 @@ describe("product index persistence", () => {
       /Invalid product evidence filePath/,
     );
     expect(existsSync(productIndexPath)).toBe(false);
+  });
+
+  it("throws for malformed evidence file paths without nodeId fallback", () => {
+    const malformedPaths = ["src\u0000/player/PlayerActivity.kt", "src//player.kt"];
+
+    for (const filePath of malformedPaths) {
+      const index = cloneIndex({
+        evidence: [
+          {
+            ...sampleIndex.evidence[0],
+            filePath,
+            nodeId: undefined,
+          },
+        ],
+      });
+
+      expect(() => saveProductIndex(testRoot, index)).toThrow(
+        /Invalid product evidence filePath/,
+      );
+      expect(existsSync(productIndexPath)).toBe(false);
+    }
   });
 });

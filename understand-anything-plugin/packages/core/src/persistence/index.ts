@@ -264,7 +264,11 @@ function getSafeProductEvidenceFilePath(
   filePath: string,
   projectRoot: string,
 ): string | null {
-  if (hasWindowsPathSyntax(filePath) || filePath.includes("\\")) {
+  if (
+    hasWindowsPathSyntax(filePath) ||
+    filePath.includes("\\") ||
+    filePath.includes("\0")
+  ) {
     return null;
   }
 
@@ -289,11 +293,9 @@ function hasWindowsPathSyntax(filePath: string): boolean {
 }
 
 function isUnsafeRelativeProductPath(filePath: string): boolean {
+  const parts = filePath.split("/");
   return (
     filePath.startsWith("/") ||
-    filePath
-      .split("/")
-      .filter(Boolean)
-      .some((part) => part === "..")
+    parts.some((part) => part === "" || part === "..")
   );
 }
