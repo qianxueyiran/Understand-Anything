@@ -15,3 +15,7 @@ export {
   type ExplainContext,
 } from "./explain-builder.js";
 export { buildOnboardingGuide } from "./onboard-builder.js";
+export {
+  runProductIndexCli,
+  type ProductIndexCliResult,
+} from "./product-index-cli.js";
