@@ -1,14 +1,20 @@
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
-import { join, isAbsolute, relative, basename } from "node:path";
+import { join, isAbsolute, relative, basename, resolve } from "node:path";
 import type { KnowledgeGraph, AnalysisMeta, ProjectConfig } from "../types.js";
 import type { FingerprintStore } from "../fingerprint.js";
 import { validateGraph } from "../schema.js";
+import {
+  validateProductIndex,
+  type ProductEvidence,
+  type ProductIndex,
+} from "../product-index.js";
 
 const UA_DIR = ".understand-anything";
 const GRAPH_FILE = "knowledge-graph.json";
 const META_FILE = "meta.json";
 const FINGERPRINT_FILE = "fingerprints.json";
 const CONFIG_FILE = "config.json";
+const PRODUCT_INDEX_FILE = "product-index.json";
 
 function ensureDir(projectRoot: string): string {
   const dir = join(projectRoot, UA_DIR);
@@ -179,4 +185,115 @@ export function loadDomainGraph(
   }
 
   return data as KnowledgeGraph;
+}
+
+export function saveProductIndex(projectRoot: string, index: ProductIndex): void {
+  const initialResult = validateProductIndex(index);
+  if (!initialResult.success) {
+    throw new Error(`Invalid product index: ${initialResult.error}`);
+  }
+
+  const sanitised = sanitiseProductEvidenceFilePaths(initialResult.data, projectRoot);
+  const finalResult = validateProductIndex(sanitised);
+  if (!finalResult.success) {
+    throw new Error(`Invalid product index after path sanitisation: ${finalResult.error}`);
+  }
+
+  const dir = ensureDir(projectRoot);
+  writeFileSync(
+    join(dir, PRODUCT_INDEX_FILE),
+    JSON.stringify(finalResult.data, null, 2),
+    "utf-8",
+  );
+}
+
+export function loadProductIndex(
+  projectRoot: string,
+  options?: { validate?: boolean },
+): ProductIndex | null {
+  const filePath = join(projectRoot, UA_DIR, PRODUCT_INDEX_FILE);
+  if (!existsSync(filePath)) return null;
+
+  const data = JSON.parse(readFileSync(filePath, "utf-8"));
+
+  if (options?.validate !== false) {
+    const result = validateProductIndex(data);
+    if (!result.success) {
+      throw new Error(`Invalid product index: ${result.error}`);
+    }
+    return result.data;
+  }
+
+  return data as ProductIndex;
+}
+
+function sanitiseProductEvidenceFilePaths(
+  index: ProductIndex,
+  projectRoot: string,
+): ProductIndex {
+  const evidence = index.evidence.map((item) =>
+    sanitiseProductEvidenceFilePath(item, projectRoot),
+  );
+  return { ...index, evidence };
+}
+
+function sanitiseProductEvidenceFilePath(
+  evidence: ProductEvidence,
+  projectRoot: string,
+): ProductEvidence {
+  if (typeof evidence.filePath !== "string") {
+    return evidence;
+  }
+
+  const safeFilePath = getSafeProductEvidenceFilePath(evidence.filePath, projectRoot);
+  if (safeFilePath) {
+    return safeFilePath === evidence.filePath
+      ? evidence
+      : { ...evidence, filePath: safeFilePath };
+  }
+
+  if (evidence.nodeId) {
+    const { filePath: _filePath, ...rest } = evidence;
+    return rest;
+  }
+
+  throw new Error(`Unsafe product evidence filePath: ${evidence.filePath}`);
+}
+
+function getSafeProductEvidenceFilePath(
+  filePath: string,
+  projectRoot: string,
+): string | null {
+  if (hasWindowsPathSyntax(filePath) || filePath.includes("\\")) {
+    return null;
+  }
+
+  if (isAbsolute(filePath)) {
+    const root = resolve(projectRoot);
+    const relativePath = relative(root, filePath);
+    if (!relativePath || isUnsafeRelativeProductPath(relativePath)) {
+      return null;
+    }
+    return relativePath;
+  }
+
+  if (isUnsafeRelativeProductPath(filePath)) {
+    return null;
+  }
+
+  return filePath;
+}
+
+function hasWindowsPathSyntax(filePath: string): boolean {
+  return /^[a-zA-Z]:[\\/]/.test(filePath) || filePath.startsWith("\\\\");
+}
+
+function isUnsafeRelativeProductPath(filePath: string): boolean {
+  return (
+    filePath.startsWith("/") ||
+    filePath
+      .split("/")
+      .filter(Boolean)
+      .some((part) => part === "..")
+  );
 }
