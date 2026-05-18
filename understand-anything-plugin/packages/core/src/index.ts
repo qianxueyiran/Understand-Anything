@@ -113,6 +113,13 @@ export {
   type ProductIndexSearchResult,
   type ProductIndexValidationResult,
 } from "./product-index.js";
+export {
+  enumerateProductEntrySeeds,
+  buildProductSignals,
+  buildDeterministicProductIndex,
+  type ProductEntrySeed,
+  type ProductProfileOptions,
+} from "./product-index-builder.js";
 // Non-code parsers
 export {
   MarkdownParser,
