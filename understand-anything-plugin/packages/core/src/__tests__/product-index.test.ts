@@ -124,6 +124,39 @@ describe("ProductIndex schema", () => {
     expect(result.error).toContain("unknown evidence id");
   });
 
+  it("rejects duplicate topic ids", () => {
+    const invalid: ProductIndex = {
+      ...sampleIndex,
+      topics: [...sampleIndex.topics, { ...sampleIndex.topics[0], name: "投屏入口" }],
+    };
+    const result = validateProductIndex(invalid);
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("duplicate topic id");
+  });
+
+  it("rejects duplicate fact ids", () => {
+    const invalid: ProductIndex = {
+      ...sampleIndex,
+      facts: [...sampleIndex.facts, { ...sampleIndex.facts[0], text: "重复事实。" }],
+    };
+    const result = validateProductIndex(invalid);
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("duplicate fact id");
+  });
+
+  it("rejects duplicate evidence ids", () => {
+    const invalid: ProductIndex = {
+      ...sampleIndex,
+      evidence: [
+        ...sampleIndex.evidence,
+        { ...sampleIndex.evidence[0], reason: "重复证据。" },
+      ],
+    };
+    const result = validateProductIndex(invalid);
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("duplicate evidence id");
+  });
+
   it("exports a zod schema for direct consumers", () => {
     const parsed = ProductIndexSchema.parse(sampleIndex);
     expect(parsed.kind).toBe("product-index");
@@ -158,6 +191,55 @@ describe("searchProductIndex", () => {
     expect(results[0].evidence.map((evidence) => evidence.id)).toContain(
       "ev:cast-allowed-field",
     );
+  });
+
+  it("includes fact-only evidence in search and returned evidence", () => {
+    const factOnlyIndex: ProductIndex = {
+      ...sampleIndex,
+      topics: [
+        {
+          ...sampleIndex.topics[0],
+          evidenceIds: ["ev:cast-button"],
+        },
+      ],
+      facts: [
+        {
+          ...sampleIndex.facts[0],
+          evidenceIds: ["ev:server-experiment"],
+        },
+      ],
+      evidence: [
+        sampleIndex.evidence[0],
+        {
+          id: "ev:server-experiment",
+          role: "data",
+          filePath: "player/model/PlaybackInfo.kt",
+          symbol: "serverExperiment",
+          lineRange: [42, 42],
+          nodeId: "class:player/model/PlaybackInfo.kt:PlaybackInfo",
+          signalTypes: ["data"],
+          tokens: ["serverExperiment"],
+          reason: "服务端实验开关。",
+          confidence: "confirmed",
+        },
+      ],
+    };
+
+    const results = searchProductIndex(factOnlyIndex, "serverExperiment");
+    expect(results.map((result) => result.topic.id)).toContain("topic:casting");
+    expect(results[0].evidence.map((evidence) => evidence.id)).toContain(
+      "ev:server-experiment",
+    );
+  });
+
+  it("matches Chinese natural-language queries", () => {
+    const results = searchProductIndex(sampleIndex, "如何开启投屏功能");
+    expect(results.map((result) => result.topic.id)).toContain("topic:casting");
+  });
+
+  it("matches punctuation-normalized queries", () => {
+    const results = searchProductIndex(sampleIndex, "投屏，");
+    expect(results.map((result) => result.topic.id)).toContain("topic:casting");
   });
 
   it("requires every query token to match", () => {

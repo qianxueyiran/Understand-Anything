@@ -155,6 +155,43 @@ export const ProductIndexSchema = z
     coverage: ProductCoverageSchema,
   })
   .superRefine((index, ctx) => {
+    const seenTopicIds = new Set<string>();
+    const seenFactIds = new Set<string>();
+    const seenEvidenceIds = new Set<string>();
+
+    for (const topic of index.topics) {
+      if (seenTopicIds.has(topic.id)) {
+        ctx.addIssue({
+          code: "custom",
+          message: `duplicate topic id ${topic.id}`,
+          path: ["topics"],
+        });
+      }
+      seenTopicIds.add(topic.id);
+    }
+
+    for (const fact of index.facts) {
+      if (seenFactIds.has(fact.id)) {
+        ctx.addIssue({
+          code: "custom",
+          message: `duplicate fact id ${fact.id}`,
+          path: ["facts"],
+        });
+      }
+      seenFactIds.add(fact.id);
+    }
+
+    for (const evidence of index.evidence) {
+      if (seenEvidenceIds.has(evidence.id)) {
+        ctx.addIssue({
+          code: "custom",
+          message: `duplicate evidence id ${evidence.id}`,
+          path: ["evidence"],
+        });
+      }
+      seenEvidenceIds.add(evidence.id);
+    }
+
     const evidenceIds = new Set(index.evidence.map((evidence) => evidence.id));
     const topicIds = new Set(index.topics.map((topic) => topic.id));
 
@@ -227,6 +264,7 @@ interface ProductIndexSearchDocument {
   facts: ProductFact[];
   evidence: ProductEvidence[];
   searchableText: string[];
+  normalizedSearchableText: string[];
   topicName: string;
   aliases: string[];
   summary: string;
@@ -306,7 +344,12 @@ function buildSearchDocuments(index: ProductIndex): ProductIndexSearchDocument[]
 
   return index.topics.map((topic) => {
     const facts = factsByTopic.get(topic.id) ?? [];
-    const evidence = Array.from(new Set([...topic.entryEvidenceIds, ...topic.evidenceIds]))
+    const evidenceIds = new Set([
+      ...topic.entryEvidenceIds,
+      ...topic.evidenceIds,
+      ...facts.flatMap((fact) => fact.evidenceIds),
+    ]);
+    const evidence = Array.from(evidenceIds)
       .map((id) => evidenceById.get(id))
       .filter((item): item is ProductEvidence => Boolean(item));
     const factText = facts.flatMap((fact) => [fact.text, ...fact.conditions]);
@@ -322,17 +365,21 @@ function buildSearchDocuments(index: ProductIndex): ProductIndexSearchDocument[]
       ...factText,
       ...evidenceTokens,
     ];
+    const normalizedSearchableText = searchableText
+      .map((text) => normalizeSearchText(text))
+      .filter(Boolean);
 
     return {
       topic,
       facts,
       evidence,
       searchableText,
-      topicName: topic.name,
-      aliases: topic.aliases,
-      summary: topic.summary,
-      factText,
-      evidenceTokens,
+      normalizedSearchableText,
+      topicName: normalizeSearchText(topic.name),
+      aliases: topic.aliases.map((alias) => normalizeSearchText(alias)).filter(Boolean),
+      summary: normalizeSearchText(topic.summary),
+      factText: factText.map((text) => normalizeSearchText(text)).filter(Boolean),
+      evidenceTokens: evidenceTokens.map((text) => normalizeSearchText(text)).filter(Boolean),
     };
   });
 }
@@ -342,23 +389,80 @@ function documentMatchesTokens(document: ProductIndexSearchDocument, tokens: str
     return false;
   }
 
-  const combined = document.searchableText.join(" ").toLowerCase();
-  return tokens.every((token) => combined.includes(token.toLowerCase()));
+  const combined = document.normalizedSearchableText.join(" ");
+  return tokens.every((token) => combined.includes(token));
 }
 
 function collectMatchedText(document: ProductIndexSearchDocument, tokens: string[]): string[] {
   const matched = document.searchableText.filter((text) => {
-    const lower = text.toLowerCase();
-    return tokens.some((token) => lower.includes(token.toLowerCase()));
+    const normalized = normalizeSearchText(text);
+    return tokens.some((token) => normalized.includes(token));
   });
 
   return Array.from(new Set(matched)).slice(0, 8);
 }
 
 function tokenizeQuery(query: string): string[] {
-  return query
-    .trim()
+  const tokens = normalizeSearchText(query)
     .split(/\s+/)
-    .map((token) => token.replace(/^(怎么|如何|为什么)/u, "").replace(/[?？。！!呢吗]+$/u, ""))
+    .flatMap((token) => normalizeQueryToken(token))
     .filter(Boolean);
+  return Array.from(new Set(tokens));
+}
+
+function normalizeSearchText(text: string): string {
+  return text
+    .normalize("NFKC")
+    .toLowerCase()
+    .replace(/[\p{P}\p{S}]+/gu, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function normalizeQueryToken(token: string): string[] {
+  const normalized = stripQueryAffixes(token);
+  return normalized ? [normalized] : [];
+}
+
+function stripQueryAffixes(token: string): string {
+  const prefixes = [
+    "为什么",
+    "如何",
+    "怎么",
+    "怎样",
+    "为何",
+    "请问",
+    "开启",
+    "打开",
+    "启用",
+    "使用",
+    "查看",
+    "进入",
+    "点击",
+    "设置",
+    "配置",
+  ];
+  const suffixes = ["功能", "能力", "入口", "按钮", "页面", "界面", "逻辑", "规则", "流程"];
+  let current = token;
+  let changed = true;
+
+  while (changed) {
+    changed = false;
+
+    for (const prefix of prefixes) {
+      if (current.startsWith(prefix) && current.length > prefix.length) {
+        current = current.slice(prefix.length);
+        changed = true;
+      }
+    }
+
+    for (const suffix of suffixes) {
+      if (current.endsWith(suffix) && current.length > suffix.length) {
+        current = current.slice(0, -suffix.length);
+        changed = true;
+      }
+    }
+  }
+
+  return current;
 }
