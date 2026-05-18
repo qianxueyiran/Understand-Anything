@@ -1,4 +1,5 @@
 import { useEffect, useState, useMemo, useCallback, lazy, Suspense } from "react";
+import { validateProductIndex } from "@understand-anything/core/product-index";
 import { validateGraph } from "@understand-anything/core/schema";
 import type { GraphIssue } from "@understand-anything/core/schema";
 import { useDashboardStore } from "./store";
@@ -13,6 +14,7 @@ import FilterPanel from "./components/FilterPanel";
 import ExportMenu from "./components/ExportMenu";
 import PersonaSelector from "./components/PersonaSelector";
 import ProjectOverview from "./components/ProjectOverview";
+import ProductIndexPanel from "./components/ProductIndexPanel";
 import FileExplorer from "./components/FileExplorer";
 import WarningBanner from "./components/WarningBanner";
 import TokenGate from "./components/TokenGate";
@@ -46,6 +48,7 @@ function dataUrl(fileName: string, token: string | null): string {
       "meta.json": import.meta.env.VITE_META_URL,
       "diff-overlay.json": import.meta.env.VITE_DIFF_OVERLAY_URL,
       "config.json": import.meta.env.VITE_CONFIG_URL,
+      "product-index.json": import.meta.env.VITE_PRODUCT_INDEX_URL,
     };
     const url = envMap[fileName];
     if (url) return url;
@@ -98,6 +101,7 @@ function App() {
 
 function Dashboard({ accessToken }: { accessToken: string }) {
   const setGraph = useDashboardStore((s) => s.setGraph);
+  const setProductIndex = useDashboardStore((s) => s.setProductIndex);
   const setDomainGraph = useDashboardStore((s) => s.setDomainGraph);
   const setDiffOverlay = useDashboardStore((s) => s.setDiffOverlay);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -176,6 +180,24 @@ function Dashboard({ accessToken }: { accessToken: string }) {
       })
       .catch(() => {});
   }, [setDiffOverlay]);
+
+  useEffect(() => {
+    fetch(dataUrl("product-index.json", accessToken))
+      .then((res) => {
+        if (!res.ok) return null;
+        return res.json();
+      })
+      .then((data: unknown) => {
+        if (!data) return;
+        const result = validateProductIndex(data);
+        if (result.success) {
+          setProductIndex(result.data);
+        } else {
+          console.warn(`[product-index] validation failed: ${result.error}`);
+        }
+      })
+      .catch(() => {});
+  }, [accessToken, setProductIndex]);
 
   useEffect(() => {
     fetch(dataUrl("domain-graph.json", accessToken))
@@ -381,7 +403,12 @@ function DashboardContent({
           <LearnPanel />
         </Suspense>
       )}
-      {!selectedNodeId && !isLearnMode && <ProjectOverview />}
+      {!selectedNodeId && !isLearnMode && (
+        <>
+          <ProductIndexPanel />
+          <ProjectOverview />
+        </>
+      )}
     </>
   );
 

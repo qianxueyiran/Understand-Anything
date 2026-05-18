@@ -195,6 +195,7 @@ export default defineConfig({
       "@understand-anything/core/schema": path.resolve(__dirname, "../core/dist/schema.js"),
       "@understand-anything/core/search": path.resolve(__dirname, "../core/dist/search.js"),
       "@understand-anything/core/types": path.resolve(__dirname, "../core/dist/types.js"),
+      "@understand-anything/core/product-index": path.resolve(__dirname, "../core/dist/product-index.js"),
     },
   },
 
@@ -253,6 +254,8 @@ export default defineConfig({
             pathname === "/diff-overlay.json" ||
             pathname === "/meta.json" ||
             pathname === "/config.json" ||
+            pathname === "/product-index.json" ||
+            pathname === "/product-signals.jsonl" ||
             pathname === "/file-content.json";
 
           if (!isProtectedEndpoint) {
@@ -291,6 +294,19 @@ export default defineConfig({
             return;
           }
 
+          if (pathname === "/product-signals.jsonl") {
+            const signalFile = findGraphFile("product-signals.jsonl");
+            if (!signalFile) {
+              res.statusCode = 404;
+              res.end();
+              return;
+            }
+            res.statusCode = 200;
+            res.setHeader("Content-Type", "application/x-ndjson");
+            res.end(fs.readFileSync(signalFile, "utf-8"));
+            return;
+          }
+
           const fileName =
             pathname === "/diff-overlay.json"
               ? "diff-overlay.json"
@@ -298,6 +314,8 @@ export default defineConfig({
               ? "meta.json"
               : pathname === "/domain-graph.json"
               ? "domain-graph.json"
+              : pathname === "/product-index.json"
+              ? "product-index.json"
               : "knowledge-graph.json";
 
           const candidates = graphFileCandidates(fileName);

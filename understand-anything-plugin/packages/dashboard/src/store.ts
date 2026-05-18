@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import type { ProductIndex } from "@understand-anything/core/product-index";
 import { SearchEngine } from "@understand-anything/core/search";
 import type { SearchResult } from "@understand-anything/core/search";
 import type { GraphIssue } from "@understand-anything/core/schema";
@@ -99,6 +100,7 @@ const MAX_HISTORY = 50;
 
 interface DashboardStore {
   graph: KnowledgeGraph | null;
+  productIndex: ProductIndex | null;
   /** id → node lookup, rebuilt by setGraph. Empty before any graph loads. */
   nodesById: Map<string, GraphNode>;
   /** id → layer id (first-matching-layer wins), rebuilt by setGraph. Empty before any graph loads. */
@@ -155,6 +157,7 @@ interface DashboardStore {
   toggleShowFunctionsInClassView: () => void;
 
   setGraph: (graph: KnowledgeGraph) => void;
+  setProductIndex: (index: ProductIndex | null) => void;
   selectNode: (nodeId: string | null) => void;
   navigateToNode: (nodeId: string) => void;
   navigateToNodeInLayer: (nodeId: string) => void;
@@ -288,6 +291,7 @@ function layerResetIfChanged(
 
 export const useDashboardStore = create<DashboardStore>()((set, get) => ({
   graph: null,
+  productIndex: null,
   nodesById: new Map<string, GraphNode>(),
   nodeIdToLayerId: new Map<string, string>(),
   nodeIdToLayerIds: new Map<string, Set<string>>(),
@@ -392,6 +396,8 @@ export const useDashboardStore = create<DashboardStore>()((set, get) => ({
       layoutIssues: [],
     });
   },
+
+  setProductIndex: (index) => set({ productIndex: index }),
 
   selectNode: (nodeId) => {
     const { selectedNodeId, nodeHistory } = get();
@@ -781,4 +787,3 @@ export const useDashboardStore = create<DashboardStore>()((set, get) => ({
     }),
   clearLayoutIssues: () => set({ layoutIssues: [] }),
 }));
-
