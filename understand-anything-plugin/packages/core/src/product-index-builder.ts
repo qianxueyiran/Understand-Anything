@@ -39,6 +39,14 @@ interface FrontierItem {
   score: number;
 }
 
+interface ScoredCandidate {
+  nodeId: string;
+  score: number;
+  signalScore: number;
+  productScore: number;
+  topicTokenScore: number;
+}
+
 const DEFAULT_ENTRY_PATTERNS = [
   /Activity$/i,
   /Fragment$/i,
@@ -162,6 +170,34 @@ const DEFAULT_MAX_NODES_PER_TOPIC = 160;
 const DEFAULT_MAX_FRONTIER_PER_DEPTH = 32;
 const DEFAULT_MAX_EVIDENCE_PER_TOPIC = 50;
 const DEFAULT_HUB_DEGREE_THRESHOLD = 80;
+const STRONG_HUB_PRODUCT_SCORE = 0.7;
+const HUB_SCORE_PENALTY = 0.25;
+const COMMON_DOMAIN_TOKENS = new Set([
+  "activity",
+  "fragment",
+  "service",
+  "receiver",
+  "worker",
+  "router",
+  "player",
+  "playback",
+  "screen",
+  "page",
+  "view",
+  "common",
+  "base",
+  "helper",
+  "manager",
+  "controller",
+  "feature",
+  "android",
+  "kotlin",
+  "java",
+  "main",
+  "app",
+  "src",
+  "model",
+]);
 
 export function enumerateProductEntrySeeds(
   graph: KnowledgeGraph,
@@ -230,7 +266,7 @@ export function buildDeterministicProductIndex(
   domainGraph: KnowledgeGraph | undefined,
   options: ProductProfileOptions,
 ): ProductIndex {
-  const analyzedAt = options.analyzedAt ?? new Date().toISOString();
+  const analyzedAt = options.analyzedAt ?? graph.project.analyzedAt;
   const seeds = enumerateProductEntrySeeds(graph, options);
   const signals = buildProductSignals(graph, options);
   const signalByNodeId = groupSignalsByNodeId(signals);
@@ -348,7 +384,28 @@ function compileEntryPatterns(patterns?: string[]): RegExp[] {
     return DEFAULT_ENTRY_PATTERNS;
   }
 
-  return patterns.map((pattern) => new RegExp(pattern.replaceAll("*", ".*"), "i"));
+  return patterns.map((pattern) => globPatternToRegex(pattern));
+}
+
+function globPatternToRegex(pattern: string): RegExp {
+  if (pattern.includes("[") || pattern.includes("]")) {
+    throw new Error(`Invalid product entry pattern: ${pattern}`);
+  }
+
+  let source = "";
+  for (const char of pattern) {
+    source += char === "*" ? ".*" : escapeRegexChar(char);
+  }
+
+  try {
+    return new RegExp(`^${source}$`, "i");
+  } catch {
+    throw new Error(`Invalid product entry pattern: ${pattern}`);
+  }
+}
+
+function escapeRegexChar(char: string): string {
+  return /[\\^$+?.()|{}]/u.test(char) ? `\\${char}` : char;
 }
 
 function isEntryCandidate(node: GraphNode, patterns: RegExp[]): boolean {
@@ -356,9 +413,11 @@ function isEntryCandidate(node: GraphNode, patterns: RegExp[]): boolean {
     return false;
   }
 
-  const pathSegments = (node.filePath ?? "").split(/[\\/]/u);
-  const filename = pathSegments[pathSegments.length - 1] ?? "";
-  return patterns.some((pattern) => pattern.test(node.name) || pattern.test(filename));
+  const filePath = node.filePath ?? "";
+  const basename = basenameWithoutExtension(filePath) ?? "";
+  return patterns.some(
+    (pattern) => pattern.test(node.name) || pattern.test(basename) || pattern.test(filePath),
+  );
 }
 
 function buildNameCandidates(node: GraphNode): string[] {
@@ -501,12 +560,13 @@ function expandFromSeed(
   const maxFrontier = options.maxFrontierPerDepth ?? DEFAULT_MAX_FRONTIER_PER_DEPTH;
   const hubDegreeThreshold = options.hubDegreeThreshold ?? DEFAULT_HUB_DEGREE_THRESHOLD;
   const nodeById = new Map(graph.nodes.map((node) => [node.id, node]));
+  const seedTokens = meaningfulBusinessTokens(seed.nameCandidates);
   const visited = new Set<string>([seed.entryNodeId]);
   const collected = [seed.entryNodeId];
   let frontier: FrontierItem[] = [{ nodeId: seed.entryNodeId, score: 1 }];
 
   for (let depth = 1; depth <= maxDepth && collected.length < maxNodes; depth += 1) {
-    const candidates: FrontierItem[] = [];
+    const candidates = new Map<string, ScoredCandidate>();
 
     for (const item of frontier) {
       for (const neighbor of adjacency.get(item.nodeId) ?? []) {
@@ -515,21 +575,42 @@ function expandFromSeed(
         }
 
         const node = nodeById.get(neighbor.nodeId);
-        if (!node || isHubNode(neighbor.nodeId, degreeByNodeId, hubDegreeThreshold)) {
+        if (!node) {
           continue;
         }
 
         const productScore = scoreTextForProductSignals(nodeSearchText(node));
         const signalScore = Math.max(...(signalByNodeId.get(neighbor.nodeId) ?? []).map((s) => s.score), 0);
-        candidates.push({
+        const topicTokenScore = scoreTopicTokenMatch(node, seedTokens);
+        const hubPenalty = hubScorePenalty({
           nodeId: neighbor.nodeId,
-          score: item.score * neighbor.weight + productScore + signalScore,
+          degreeByNodeId,
+          hubDegreeThreshold,
+          signalScore,
+          productScore,
+          topicTokenScore,
         });
+        if (hubPenalty === 0) {
+          continue;
+        }
+
+        const candidate = {
+          nodeId: neighbor.nodeId,
+          score: item.score * neighbor.weight * hubPenalty + productScore + signalScore + topicTokenScore,
+          signalScore,
+          productScore,
+          topicTokenScore,
+        };
+        const existing = candidates.get(candidate.nodeId);
+        if (!existing || candidate.score > existing.score) {
+          candidates.set(candidate.nodeId, candidate);
+        }
       }
     }
 
-    frontier = candidates
+    frontier = Array.from(candidates.values())
       .sort((a, b) => b.score - a.score || a.nodeId.localeCompare(b.nodeId))
+      .map(({ nodeId, score }) => ({ nodeId, score }))
       .slice(0, maxFrontier);
 
     if (frontier.length === 0) {
@@ -552,12 +633,40 @@ function expandFromSeed(
   return collected;
 }
 
-function isHubNode(
-  nodeId: string,
-  degreeByNodeId: Map<string, number>,
-  hubDegreeThreshold: number,
-): boolean {
-  return (degreeByNodeId.get(nodeId) ?? 0) > hubDegreeThreshold;
+function hubScorePenalty({
+  nodeId,
+  degreeByNodeId,
+  hubDegreeThreshold,
+  signalScore,
+  productScore,
+  topicTokenScore,
+}: {
+  nodeId: string;
+  degreeByNodeId: Map<string, number>;
+  hubDegreeThreshold: number;
+  signalScore: number;
+  productScore: number;
+  topicTokenScore: number;
+}): number {
+  if ((degreeByNodeId.get(nodeId) ?? 0) <= hubDegreeThreshold) {
+    return 1;
+  }
+
+  const strongProductValue =
+    signalScore >= STRONG_HUB_PRODUCT_SCORE ||
+    productScore >= STRONG_HUB_PRODUCT_SCORE ||
+    (topicTokenScore > 0 && signalScore >= 0.45);
+  return strongProductValue ? HUB_SCORE_PENALTY : 0;
+}
+
+function scoreTopicTokenMatch(node: GraphNode, seedTokens: string[]): number {
+  if (seedTokens.length === 0) {
+    return 0;
+  }
+
+  const text = normalizedCompactText(nodeSearchText(node));
+  const matches = seedTokens.filter((token) => text.includes(token)).length;
+  return matches === 0 ? 0 : Math.min(0.35, matches * 0.12);
 }
 
 function groupSignalsByNodeId(signals: ProductSignal[]): Map<string, ProductSignal[]> {
@@ -605,15 +714,47 @@ function collectDomainRefs(domainGraph: KnowledgeGraph | undefined, candidates: 
     return [];
   }
 
-  const tokens = candidates.flatMap((candidate) => extractTokens(candidate.toLowerCase()));
+  const tokens = meaningfulBusinessTokens(candidates);
+  if (tokens.length === 0) {
+    return [];
+  }
+
   return domainGraph.nodes
     .filter((node) => node.type === "domain" || node.type === "flow" || node.type === "topic")
     .filter((node) => {
-      const text = nodeSearchText(node).toLowerCase();
+      const text = normalizedCompactText(nodeSearchText(node));
       return tokens.some((token) => text.includes(token));
     })
     .map((node) => node.id)
     .slice(0, 8);
+}
+
+function meaningfulBusinessTokens(values: string[]): string[] {
+  const tokens = values.flatMap((value) => [
+    ...extractTokens(value),
+    ...splitCamelCaseTokens(value),
+  ]);
+
+  return uniqueStrings(
+    tokens
+      .map((token) => token.toLowerCase())
+      .filter((token) => token.length >= 4)
+      .filter((token) => !/^\d+$/u.test(token))
+      .filter((token) => !COMMON_DOMAIN_TOKENS.has(token)),
+  );
+}
+
+function splitCamelCaseTokens(value: string): string[] {
+  return value
+    .normalize("NFKC")
+    .replace(/([a-z0-9])([A-Z])/gu, "$1 $2")
+    .split(/[^A-Za-z0-9_\u4e00-\u9fa5]+/u)
+    .map((token) => token.trim())
+    .filter((token) => token.length > 0);
+}
+
+function normalizedCompactText(value: string): string {
+  return value.normalize("NFKC").toLowerCase();
 }
 
 function basenameWithoutExtension(filePath: string | undefined): string | undefined {

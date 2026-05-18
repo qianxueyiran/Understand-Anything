@@ -34,6 +34,29 @@ function edge(overrides: Partial<GraphEdge> & { source: string; target: string }
   };
 }
 
+function graphWith(
+  nodes: GraphNode[],
+  edges: GraphEdge[] = [],
+  overrides: Partial<KnowledgeGraph> = {},
+): KnowledgeGraph {
+  return {
+    version: "1.0.0",
+    project: {
+      name: "video-app",
+      languages: ["kotlin"],
+      frameworks: ["android"],
+      description: "Video app",
+      analyzedAt: "2026-05-18T00:00:00.000Z",
+      gitCommitHash: "abc123",
+    },
+    nodes,
+    edges,
+    layers: [],
+    tour: [],
+    ...overrides,
+  };
+}
+
 const graph: KnowledgeGraph = {
   version: "1.0.0",
   project: {
@@ -222,6 +245,19 @@ const domainGraph: KnowledgeGraph = {
 };
 
 describe("product index builder", () => {
+  it("defaults analyzedAt deterministically from graph project metadata", () => {
+    const index = buildDeterministicProductIndex(graph, undefined, {
+      platform: "android",
+      maxDepth: 1,
+      maxNodesPerTopic: 5,
+      maxFrontierPerDepth: 5,
+      maxEvidencePerTopic: 5,
+      hubDegreeThreshold: 20,
+    });
+
+    expect(index.project.analyzedAt).toBe(graph.project.analyzedAt);
+  });
+
   it("enumerates Android entry seeds from entry-like names and paths", () => {
     const seeds = enumerateProductEntrySeeds(graph, { platform: "android" });
     const seedIds = seeds.map((seed) => seed.entryNodeId);
@@ -242,6 +278,64 @@ describe("product index builder", () => {
     expect(seeds.find((seed) => seed.entryNodeId.endsWith("PlaybackRouter"))?.entryKind).toBe(
       "router",
     );
+  });
+
+  it("uses anchored glob entry patterns for node names", () => {
+    const patternGraph = graphWith([
+      node({
+        id: "class:player/PlayerActivity.kt:PlayerActivity",
+        name: "PlayerActivity",
+        filePath: "player/PlayerActivity.kt",
+        summary: "播放页 Activity。",
+        tags: ["activity"],
+      }),
+      node({
+        id: "class:player/PlayerActivityHelper.kt:PlayerActivityHelper",
+        name: "PlayerActivityHelper",
+        filePath: "player/PlayerActivityHelper.kt",
+        summary: "播放页辅助类。",
+        tags: ["helper"],
+      }),
+    ]);
+
+    const seeds = enumerateProductEntrySeeds(patternGraph, {
+      platform: "android",
+      entryPatterns: ["*Activity"],
+    });
+
+    expect(seeds.map((seed) => seed.entryNodeId)).toEqual([
+      "class:player/PlayerActivity.kt:PlayerActivity",
+    ]);
+  });
+
+  it("matches entry pattern globs against full file paths", () => {
+    const patternGraph = graphWith([
+      node({
+        id: "class:feature/player/PlayerScreen.kt:PlayerScreen",
+        name: "PlayerScreen",
+        filePath: "feature/player/PlayerActivity.kt",
+        summary: "播放页 Activity。",
+        tags: ["activity"],
+      }),
+    ]);
+
+    const seeds = enumerateProductEntrySeeds(patternGraph, {
+      platform: "android",
+      entryPatterns: ["**/*Activity.kt"],
+    });
+
+    expect(seeds.map((seed) => seed.entryNodeId)).toEqual([
+      "class:feature/player/PlayerScreen.kt:PlayerScreen",
+    ]);
+  });
+
+  it("throws a clear error for invalid custom entry pattern syntax", () => {
+    expect(() =>
+      enumerateProductEntrySeeds(graph, {
+        platform: "android",
+        entryPatterns: ["["],
+      }),
+    ).toThrow("Invalid product entry pattern: [");
   });
 
   it("builds deterministic product signals from node text without LLM", () => {
@@ -300,6 +394,136 @@ describe("product index builder", () => {
       playbackInfoId,
     );
     expect(deepWithHubCutoff.evidence.map((evidence) => evidence.nodeId)).not.toContain(hubId);
+  });
+
+  it("deduplicates frontier candidates before applying per-depth limits", () => {
+    const duplicateId = "function:player/CastPolicy.kt:checkCastPolicy";
+    const distinctId = "function:player/CastAvailability.kt:resolveCastAvailability";
+    const duplicateGraph = graphWith(
+      [
+        node({
+          id: playerActivityId,
+          name: "PlayerActivity",
+          filePath: "player/PlayerActivity.kt",
+          summary: "播放页 Activity，包含投屏按钮入口。",
+          tags: ["activity", "cast"],
+        }),
+        node({
+          id: duplicateId,
+          type: "function",
+          name: "checkCastPolicy",
+          filePath: "player/CastPolicy.kt",
+          summary: "检查投屏 policy 和 allowed 规则。",
+          tags: ["cast", "policy", "allowed"],
+        }),
+        node({
+          id: distinctId,
+          type: "function",
+          name: "resolveCastAvailability",
+          filePath: "player/CastAvailability.kt",
+          summary: "解析投屏可用状态和按钮展示。",
+          tags: ["cast", "available", "button"],
+        }),
+      ],
+      [
+        edge({ source: playerActivityId, target: duplicateId, type: "calls", weight: 1 }),
+        edge({ source: playerActivityId, target: duplicateId, type: "calls", weight: 0.95 }),
+        edge({ source: playerActivityId, target: duplicateId, type: "calls", weight: 0.9 }),
+        edge({ source: playerActivityId, target: distinctId, type: "calls", weight: 0.2 }),
+      ],
+    );
+
+    const index = buildDeterministicProductIndex(duplicateGraph, undefined, {
+      platform: "android",
+      analyzedAt: "2026-05-18T00:00:00.000Z",
+      maxDepth: 1,
+      maxNodesPerTopic: 10,
+      maxFrontierPerDepth: 3,
+      maxEvidencePerTopic: 5,
+      hubDegreeThreshold: 20,
+    });
+
+    expect(index.evidence.map((evidence) => evidence.nodeId)).toEqual(
+      expect.arrayContaining([duplicateId, distinctId]),
+    );
+  });
+
+  it("keeps high-signal hub nodes despite hub degree penalty", () => {
+    const highSignalHubId = "class:player/CastHub.kt:CastHub";
+    const hubGraph = graphWith(
+      [
+        node({
+          id: playerActivityId,
+          name: "PlayerActivity",
+          filePath: "player/PlayerActivity.kt",
+          summary: "播放页 Activity，包含投屏按钮入口。",
+          tags: ["activity", "cast"],
+        }),
+        node({
+          id: highSignalHubId,
+          name: "CastHub",
+          filePath: "player/CastHub.kt",
+          summary: "投屏 SDK 集成、castAllowed 规则和按钮可用状态中心。",
+          tags: ["cast", "sdk", "allowed", "button", "policy"],
+        }),
+        ...Array.from({ length: 5 }, (_, index) =>
+          node({
+            id: `class:common/HubDependency${index}.kt:HubDependency${index}`,
+            name: `HubDependency${index}`,
+            filePath: `common/HubDependency${index}.kt`,
+            summary: "通用依赖。",
+            tags: ["common"],
+          }),
+        ),
+      ],
+      [
+        edge({ source: playerActivityId, target: highSignalHubId, type: "calls", weight: 0.7 }),
+        ...Array.from({ length: 5 }, (_, index) =>
+          edge({
+            source: highSignalHubId,
+            target: `class:common/HubDependency${index}.kt:HubDependency${index}`,
+            type: "depends_on",
+            weight: 1,
+          }),
+        ),
+      ],
+    );
+
+    const index = buildDeterministicProductIndex(hubGraph, undefined, {
+      platform: "android",
+      analyzedAt: "2026-05-18T00:00:00.000Z",
+      maxDepth: 1,
+      maxNodesPerTopic: 10,
+      maxFrontierPerDepth: 5,
+      maxEvidencePerTopic: 5,
+      hubDegreeThreshold: 2,
+    });
+
+    expect(index.evidence.map((evidence) => evidence.nodeId)).toContain(highSignalHubId);
+  });
+
+  it("does not create domain refs from only short or common path tokens", () => {
+    const commonDomainGraph = graphWith([
+      node({
+        id: "domain:generic-player",
+        type: "domain",
+        name: "Player shell",
+        summary: "Generic app page container.",
+        tags: ["common"],
+      }),
+    ]);
+
+    const index = buildDeterministicProductIndex(graph, commonDomainGraph, {
+      platform: "android",
+      analyzedAt: "2026-05-18T00:00:00.000Z",
+      maxDepth: 1,
+      maxNodesPerTopic: 10,
+      maxFrontierPerDepth: 5,
+      maxEvidencePerTopic: 5,
+      hubDegreeThreshold: 20,
+    });
+
+    expect(index.topics.find((topic) => topic.name === "PlayerActivity")?.domainRefs).toEqual([]);
   });
 
   it("builds a valid ProductIndex draft with topics, sources, coverage, and empty facts", () => {
