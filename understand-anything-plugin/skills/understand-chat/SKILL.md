@@ -29,6 +29,8 @@ The knowledge graph JSON has this structure:
 
 ## Instructions
 
+0. 如果 `.understand-anything/product-index.json` 存在，并且用户问题涉及页面、入口、按钮、标签、展示条件、业务规则、后台能力、投屏、同步、下载、Push、埋点、SDK 回调等产品问题，优先检索 product index。命中 product topic/fact 后，用 evidence 的 `nodeId` 或 `filePath` 反查 `knowledge-graph.json`，再回答；如果 evidence 是 inferred、uncertain、seeded、indexed 或候选信号，要明确说明证据较弱或仅定位到候选代码。
+
 1. Check that `.understand-anything/knowledge-graph.json` exists in the current project root. If not, tell the user to run `/understand` first.
 
 2. **Read project metadata only** — use Grep or Read with a line limit to extract just the `"project"` section from the top of the file for context (name, description, languages, frameworks).
