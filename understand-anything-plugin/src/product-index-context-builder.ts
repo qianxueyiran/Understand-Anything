@@ -12,6 +12,19 @@ const MAX_EVIDENCE_PER_TOPIC = 8;
 const MAX_CODE_EVIDENCE_NODES = 12;
 const MAX_DOMAIN_NODES = 8;
 const MAX_MATCHED_TEXT = 8;
+const MAX_ALIASES_PER_TOPIC = 4;
+const MAX_CONDITIONS_PER_FACT = 3;
+const MAX_CONTEXT_CHARS = 8000;
+const MAX_TOPIC_NAME_CHARS = 120;
+const MAX_SUMMARY_CHARS = 360;
+const MAX_ALIAS_CHARS = 80;
+const MAX_FACT_TEXT_CHARS = 420;
+const MAX_CONDITION_CHARS = 180;
+const MAX_EVIDENCE_REASON_CHARS = 320;
+const MAX_MATCHED_TEXT_CHARS = 180;
+const MAX_DOMAIN_SUMMARY_CHARS = 240;
+const MAX_CODE_SUMMARY_CHARS = 240;
+const CONTEXT_TRUNCATED_NOTICE = "[Product Index context truncated]";
 
 export interface ProductIndexChatContextInput {
   graph: KnowledgeGraph;
@@ -69,68 +82,106 @@ export function formatProductIndexContextForPrompt(
     return "";
   }
 
-  const lines: string[] = [];
-  lines.push("## Product Index");
-  lines.push("");
-  lines.push(`Project: ${ctx.projectName}`);
-  lines.push(`Query: ${ctx.query}`);
-  lines.push("");
+  const writer = createBudgetedWriter(MAX_CONTEXT_CHARS);
+  writer.push("## Product Index");
+  writer.push("");
+  writer.push(`Project: ${truncateText(ctx.projectName, MAX_TOPIC_NAME_CHARS)}`);
+  writer.push(`Query: ${truncateText(ctx.query, MAX_FACT_TEXT_CHARS)}`);
+  writer.push("");
 
   for (const result of ctx.productResults) {
-    lines.push(`### ${result.topic.name}`);
-    lines.push(`- Topic ID: ${result.topic.id}`);
-    lines.push(`- Kind: ${result.topic.kind}`);
-    lines.push(`- Status: ${result.topic.status}`);
-    lines.push(`- Summary: ${result.topic.summary}`);
+    const emittedTexts = new Set<string>();
+    rememberText(emittedTexts, result.topic.name);
+    rememberText(emittedTexts, result.topic.summary);
+
+    writer.push(`### ${truncateText(result.topic.name, MAX_TOPIC_NAME_CHARS)}`);
+    writer.push(`- Topic ID: ${result.topic.id}`);
+    writer.push(`- Kind: ${result.topic.kind}`);
+    writer.push(`- Status: ${result.topic.status}`);
+    writer.push(`- Summary: ${truncateText(result.topic.summary, MAX_SUMMARY_CHARS)}`);
     if (result.topic.aliases.length > 0) {
-      lines.push(`- Aliases: ${result.topic.aliases.join(", ")}`);
+      const aliases = result.topic.aliases.slice(0, MAX_ALIASES_PER_TOPIC);
+      for (const alias of aliases) {
+        rememberText(emittedTexts, alias);
+      }
+      writer.push(
+        `- Aliases: ${aliases
+          .map((alias) => truncateText(alias, MAX_ALIAS_CHARS))
+          .join(", ")}`,
+      );
     }
 
     if (result.facts.length > 0) {
-      lines.push("- Facts:");
+      writer.push("- Facts:");
       for (const fact of result.facts) {
-        lines.push(`  - [${fact.type}/${fact.confidence}/${fact.maturity}] ${fact.text}`);
+        rememberText(emittedTexts, fact.text);
+        writer.push(
+          `  - [${fact.type}/${fact.confidence}/${fact.maturity}] ${truncateText(
+            fact.text,
+            MAX_FACT_TEXT_CHARS,
+          )}`,
+        );
         if (fact.conditions.length > 0) {
-          lines.push(`    Conditions: ${fact.conditions.join(", ")}`);
+          const conditions = fact.conditions.slice(0, MAX_CONDITIONS_PER_FACT);
+          for (const condition of conditions) {
+            rememberText(emittedTexts, condition);
+          }
+          writer.push(
+            `    Conditions: ${conditions
+              .map((condition) => truncateText(condition, MAX_CONDITION_CHARS))
+              .join(", ")}`,
+          );
         }
       }
     }
 
     if (result.evidence.length > 0) {
-      lines.push("- Evidence:");
+      writer.push("- Evidence:");
       for (const evidence of result.evidence) {
-        lines.push(
+        rememberText(emittedTexts, evidence.reason);
+        writer.push(
           `  - [${evidence.role}/${evidence.confidence}] ${formatEvidenceLocation(
             evidence,
-          )}: ${evidence.reason}`,
+          )}: ${truncateText(evidence.reason, MAX_EVIDENCE_REASON_CHARS)}`,
         );
       }
     }
 
-    if (result.matchedText.length > 0) {
-      lines.push(`- Matched Text: ${result.matchedText.join(" | ")}`);
+    const matchedText = uniqueShortMatchedText(result.matchedText, emittedTexts);
+    if (matchedText.length > 0) {
+      writer.push(`- Matched Text: ${matchedText.join(" | ")}`);
     }
-    lines.push("");
+    writer.push("");
   }
 
   if (ctx.domainNodes.length > 0) {
-    lines.push("## Domain Context");
+    writer.push("## Domain Context");
     for (const node of ctx.domainNodes) {
-      lines.push(`- ${node.name} (${node.id}): ${node.summary}`);
+      writer.push(
+        `- ${truncateText(node.name, MAX_TOPIC_NAME_CHARS)} (${node.id}): ${truncateText(
+          node.summary,
+          MAX_DOMAIN_SUMMARY_CHARS,
+        )}`,
+      );
     }
-    lines.push("");
+    writer.push("");
   }
 
   if (ctx.codeEvidenceNodes.length > 0) {
-    lines.push("## Code Evidence Nodes");
+    writer.push("## Code Evidence Nodes");
     for (const node of ctx.codeEvidenceNodes) {
       const location = formatNodeLocation(node);
-      lines.push(`- ${node.name} (${node.id})${location}: ${node.summary}`);
+      writer.push(
+        `- ${truncateText(node.name, MAX_TOPIC_NAME_CHARS)} (${node.id})${location}: ${truncateText(
+          node.summary,
+          MAX_CODE_SUMMARY_CHARS,
+        )}`,
+      );
     }
-    lines.push("");
+    writer.push("");
   }
 
-  return lines.join("\n");
+  return writer.toString();
 }
 
 function limitProductResult(result: ProductIndexSearchResult): ProductIndexSearchResult {
@@ -202,13 +253,11 @@ function findEvidenceNode(
     if (symbolNode) {
       return symbolNode;
     }
+
+    return sameFileNodes.find((node) => node.type === "file");
   }
 
-  return (
-    sameFileNodes.find((node) => node.type === "file") ??
-    sameFileNodes[0] ??
-    nodes.find((node) => node.filePath === evidence.filePath)
-  );
+  return sameFileNodes.find((node) => node.type === "file");
 }
 
 function formatEvidenceLocation(evidence: ProductEvidence): string {
@@ -229,4 +278,103 @@ function formatNodeLocation(node: GraphNode): string {
   ].filter(Boolean);
 
   return parts.length > 0 ? ` - ${parts.join(" ")}` : "";
+}
+
+function createBudgetedWriter(maxChars: number): {
+  push: (line: string) => void;
+  toString: () => string;
+} {
+  const lines: string[] = [];
+  let used = 0;
+  let truncated = false;
+
+  return {
+    push(line: string): void {
+      if (truncated) {
+        return;
+      }
+
+      const prefix = lines.length > 0 ? 1 : 0;
+      const available = maxChars - used - prefix;
+      if (available <= 0) {
+        if (maxChars > used) {
+          lines.push(truncateText(CONTEXT_TRUNCATED_NOTICE, maxChars - used));
+        }
+        truncated = true;
+        return;
+      }
+
+      if (line.length <= available) {
+        lines.push(line);
+        used += line.length + prefix;
+        return;
+      }
+
+      const noticeBudget = CONTEXT_TRUNCATED_NOTICE.length;
+      if (available <= noticeBudget + 1) {
+        lines.push(truncateText(CONTEXT_TRUNCATED_NOTICE, available));
+        truncated = true;
+        return;
+      }
+
+      const lineBudget = available - noticeBudget - 1;
+      lines.push(truncateText(line, lineBudget));
+      lines.push(CONTEXT_TRUNCATED_NOTICE);
+      truncated = true;
+    },
+    toString(): string {
+      return lines.join("\n");
+    },
+  };
+}
+
+function uniqueShortMatchedText(
+  matchedText: string[],
+  emittedTexts: Set<string>,
+): string[] {
+  const seen = new Set<string>();
+  const output: string[] = [];
+
+  for (const text of matchedText) {
+    const normalized = normalizeComparableText(text);
+    if (!normalized || emittedTexts.has(normalized) || seen.has(normalized)) {
+      continue;
+    }
+
+    seen.add(normalized);
+    output.push(truncateText(text, MAX_MATCHED_TEXT_CHARS));
+    if (output.length >= MAX_MATCHED_TEXT) {
+      break;
+    }
+  }
+
+  return output;
+}
+
+function rememberText(texts: Set<string>, text: string | undefined): void {
+  const normalized = normalizeComparableText(text);
+  if (normalized) {
+    texts.add(normalized);
+  }
+}
+
+function normalizeComparableText(text: string | undefined): string {
+  return (text ?? "").normalize("NFKC").replace(/\s+/g, " ").trim().toLowerCase();
+}
+
+function truncateText(text: string, maxChars: number): string {
+  if (maxChars <= 0) {
+    return "";
+  }
+
+  const normalized = text.replace(/\s+/g, " ").trim();
+  if (normalized.length <= maxChars) {
+    return normalized;
+  }
+
+  if (maxChars <= 1) {
+    return "…";
+  }
+
+  return `${normalized.slice(0, maxChars - 1).trimEnd()}…`;
 }

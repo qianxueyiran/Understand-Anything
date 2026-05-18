@@ -47,6 +47,22 @@ const graph: KnowledgeGraph = {
   tour: [],
 };
 
+const graphWithFileNode: KnowledgeGraph = {
+  ...graph,
+  nodes: [
+    {
+      id: "file:player/CastButton.kt",
+      type: "file",
+      name: "CastButton.kt",
+      filePath: "player/CastButton.kt",
+      summary: "投屏按钮文件。",
+      tags: ["cast"],
+      complexity: "simple",
+    },
+    ...graph.nodes,
+  ],
+};
+
 const domainGraph: KnowledgeGraph = {
   ...graph,
   nodes: [
@@ -250,3 +266,146 @@ describe("product index chat context", () => {
     expect(ctx.domainNodes.map((node) => node.id)).toEqual(["domain:casting"]);
   });
 });
+
+describe("product index prompt budget and fallback safety", () => {
+  it("truncates long fields and caps aliases and conditions", () => {
+    const longText = "投屏".repeat(300);
+    const indexWithLongFields: ProductIndex = {
+      ...productIndex,
+      topics: [
+        {
+          ...productIndex.topics[0],
+          aliases: ["Cast One", "Cast Two", "Cast Three", "Cast Four", "Cast Five"],
+          summary: `${longText}SUMMARY_TAIL_SHOULD_NOT_APPEAR`,
+        },
+      ],
+      facts: [
+        {
+          ...productIndex.facts[0],
+          text: `${longText}FACT_TAIL_SHOULD_NOT_APPEAR`,
+          conditions: [
+            "condition-1",
+            "condition-2",
+            "condition-3",
+            "condition-4",
+            "condition-5",
+          ],
+        },
+      ],
+      evidence: [
+        {
+          ...productIndex.evidence[0],
+          reason: `${longText}REASON_TAIL_SHOULD_NOT_APPEAR`,
+        },
+      ],
+    };
+
+    const formatted = formatProductIndexContextForPrompt(
+      buildProductIndexChatContext({
+        graph,
+        productIndex: indexWithLongFields,
+        query: "投屏",
+      }),
+    );
+
+    expect(formatted.length).toBeLessThan(4000);
+    expect(formatted).not.toContain("SUMMARY_TAIL_SHOULD_NOT_APPEAR");
+    expect(formatted).not.toContain("FACT_TAIL_SHOULD_NOT_APPEAR");
+    expect(formatted).not.toContain("REASON_TAIL_SHOULD_NOT_APPEAR");
+    expect(formatted).toContain("Cast Four");
+    expect(formatted).not.toContain("Cast Five");
+    expect(formatted).toContain("condition-3");
+    expect(formatted).not.toContain("condition-4");
+  });
+
+  it("does not repeat matchedText already emitted as topic, fact, or evidence text", () => {
+    const formatted = formatProductIndexContextForPrompt(
+      buildProductIndexChatContext({
+        graph,
+        productIndex,
+        query: "投屏",
+      }),
+    );
+
+    expect(countOccurrences(formatted, "播放页提供投屏入口。")).toBe(1);
+    expect(countOccurrences(formatted, "播放页入口。")).toBe(1);
+  });
+
+  it("does not map a stale evidence symbol to an arbitrary same-file code node", () => {
+    const indexWithStaleSymbol: ProductIndex = {
+      ...productIndex,
+      topics: [
+        {
+          ...productIndex.topics[0],
+          evidenceIds: ["ev:stale-symbol"],
+          entryEvidenceIds: ["ev:stale-symbol"],
+        },
+      ],
+      facts: [
+        {
+          ...productIndex.facts[0],
+          evidenceIds: ["ev:stale-symbol"],
+        },
+      ],
+      evidence: [
+        {
+          ...productIndex.evidence[0],
+          id: "ev:stale-symbol",
+          filePath: "player/CastButton.kt",
+          symbol: "removedCastEntryPoint",
+          nodeId: undefined,
+        },
+      ],
+    };
+
+    const ctx = buildProductIndexChatContext({
+      graph,
+      productIndex: indexWithStaleSymbol,
+      query: "投屏",
+    });
+
+    expect(ctx.codeEvidenceNodes).toEqual([]);
+  });
+
+  it("falls back stale evidence symbols only to an explicit file node", () => {
+    const indexWithStaleSymbol: ProductIndex = {
+      ...productIndex,
+      topics: [
+        {
+          ...productIndex.topics[0],
+          evidenceIds: ["ev:stale-symbol"],
+          entryEvidenceIds: ["ev:stale-symbol"],
+        },
+      ],
+      facts: [
+        {
+          ...productIndex.facts[0],
+          evidenceIds: ["ev:stale-symbol"],
+        },
+      ],
+      evidence: [
+        {
+          ...productIndex.evidence[0],
+          id: "ev:stale-symbol",
+          filePath: "player/CastButton.kt",
+          symbol: "removedCastEntryPoint",
+          nodeId: undefined,
+        },
+      ],
+    };
+
+    const ctx = buildProductIndexChatContext({
+      graph: graphWithFileNode,
+      productIndex: indexWithStaleSymbol,
+      query: "投屏",
+    });
+
+    expect(ctx.codeEvidenceNodes.map((node) => node.id)).toEqual([
+      "file:player/CastButton.kt",
+    ]);
+  });
+});
+
+function countOccurrences(text: string, needle: string): number {
+  return text.split(needle).length - 1;
+}
