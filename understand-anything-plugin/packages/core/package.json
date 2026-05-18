@@ -21,6 +21,10 @@
       "types": "./dist/schema.d.ts",
       "default": "./dist/schema.js"
     },
+    "./product-index": {
+      "types": "./dist/product-index.d.ts",
+      "default": "./dist/product-index.js"
+    },
     "./languages": {
       "types": "./dist/languages/index.d.ts",
       "default": "./dist/languages/index.js"

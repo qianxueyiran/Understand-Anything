@@ -100,6 +100,19 @@ export {
   classifyUpdate,
   type UpdateDecision,
 } from "./change-classifier.js";
+export {
+  ProductIndexSchema,
+  ProductSignalSchema,
+  validateProductIndex,
+  searchProductIndex,
+  type ProductIndex,
+  type ProductTopic,
+  type ProductFact,
+  type ProductEvidence,
+  type ProductSignal,
+  type ProductIndexSearchResult,
+  type ProductIndexValidationResult,
+} from "./product-index.js";
 // Non-code parsers
 export {
   MarkdownParser,
