@@ -338,8 +338,12 @@ function buildSearchDocuments(index: ProductIndex): ProductIndexSearchDocument[]
 }
 
 function documentMatchesTokens(document: ProductIndexSearchDocument, tokens: string[]): boolean {
+  if (tokens.length === 0) {
+    return false;
+  }
+
   const combined = document.searchableText.join(" ").toLowerCase();
-  return tokens.some((token) => combined.includes(token.toLowerCase()));
+  return tokens.every((token) => combined.includes(token.toLowerCase()));
 }
 
 function collectMatchedText(document: ProductIndexSearchDocument, tokens: string[]): string[] {

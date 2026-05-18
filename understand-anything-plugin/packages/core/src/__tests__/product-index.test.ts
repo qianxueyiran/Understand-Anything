@@ -132,11 +132,36 @@ describe("ProductIndex schema", () => {
 
 describe("searchProductIndex", () => {
   it("matches by topic name, aliases, fact text, and evidence tokens", () => {
-    const results = searchProductIndex(sampleIndex, "投屏 为什么 不可用");
+    const results = searchProductIndex(sampleIndex, "投屏 可用");
     expect(results.map((result) => result.topic.id)).toContain("topic:casting");
     expect(results[0].facts.map((fact) => fact.id)).toContain(
       "fact:casting-disabled-by-cast-allowed",
     );
+  });
+
+  it("matches by topic alias", () => {
+    const results = searchProductIndex(sampleIndex, "DLNA");
+    expect(results.map((result) => result.topic.id)).toContain("topic:casting");
+  });
+
+  it("matches by fact condition", () => {
+    const results = searchProductIndex(sampleIndex, "castAllowed=false");
+    expect(results.map((result) => result.topic.id)).toContain("topic:casting");
+    expect(results[0].facts.map((fact) => fact.id)).toContain(
+      "fact:casting-disabled-by-cast-allowed",
+    );
+  });
+
+  it("matches by evidence token", () => {
+    const results = searchProductIndex(sampleIndex, "allowed");
+    expect(results.map((result) => result.topic.id)).toContain("topic:casting");
+    expect(results[0].evidence.map((evidence) => evidence.id)).toContain(
+      "ev:cast-allowed-field",
+    );
+  });
+
+  it("requires every query token to match", () => {
+    expect(searchProductIndex(sampleIndex, "投屏 购物车")).toEqual([]);
   });
 
   it("returns empty results for unrelated queries", () => {
