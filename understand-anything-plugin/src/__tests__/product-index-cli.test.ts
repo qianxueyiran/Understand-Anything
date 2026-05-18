@@ -111,6 +111,11 @@ describe("product-index CLI", () => {
     );
   });
 
+  it("rejects flag-like project roots with usage error", async () => {
+    await expect(runProductIndexCli(["--unknown"])).rejects.toThrow(/Usage:/);
+    await expect(runProductIndexCli(["--fast"])).rejects.toThrow(/Usage:/);
+  });
+
   it("rejects value flags with missing values", async () => {
     await expect(runProductIndexCli([testRoot, "--platform"])).rejects.toThrow(
       /Missing value for --platform/,
@@ -143,6 +148,7 @@ describe("product-index CLI", () => {
   it("does not write unsafe signal file paths to the sidecar", async () => {
     const unsafePaths = [
       "/tmp/outside/PlayerActivity.kt",
+      "/Users/private-user/outsideSecret/PlayerActivity.kt",
       "C:\\repo\\player\\PlayerActivity.kt",
       "\\\\server\\share\\PlayerActivity.kt",
       "app\\src\\main\\PlayerActivity.kt",
@@ -166,8 +172,17 @@ describe("product-index CLI", () => {
       join(testRoot, ".understand-anything", "product-signals.jsonl"),
       "utf-8",
     );
+    const productIndexContent = readFileSync(
+      join(testRoot, ".understand-anything", "product-index.json"),
+      "utf-8",
+    );
     for (const filePath of unsafePaths) {
       expect(signalContent).not.toContain(filePath);
+      expect(productIndexContent).not.toContain(filePath);
+    }
+    for (const sensitiveToken of ["Users", "private-user", "outsideSecret"]) {
+      expect(signalContent).not.toContain(sensitiveToken);
+      expect(productIndexContent).not.toContain(sensitiveToken);
     }
     expect(readSignals().every((signal) => signal.filePath === undefined)).toBe(
       true,

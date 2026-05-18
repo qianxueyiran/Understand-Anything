@@ -6,6 +6,7 @@ import {
   loadDomainGraph,
   loadGraph,
   saveProductIndex,
+  type KnowledgeGraph,
   type ProductSignal,
   type ProductProfileOptions,
 } from "@understand-anything/core";
@@ -35,13 +36,17 @@ export async function runProductIndexCli(
     );
   }
 
-  const graph = loadGraph(options.projectRoot);
-  if (!graph) {
+  const loadedGraph = loadGraph(options.projectRoot);
+  if (!loadedGraph) {
     throw new Error("Failed to load knowledge graph.");
   }
 
-  const domainGraph =
+  const loadedDomainGraph =
     loadDomainGraph(options.projectRoot, { validate: false }) ?? undefined;
+  const graph = sanitiseKnowledgeGraphFilePaths(loadedGraph, options.projectRoot);
+  const domainGraph = loadedDomainGraph
+    ? sanitiseKnowledgeGraphFilePaths(loadedDomainGraph, options.projectRoot)
+    : undefined;
 
   const builderOptions: ProductProfileOptions = {
     platform: options.platform,
@@ -125,7 +130,7 @@ const NUMERIC_FLAGS = new Set([
 
 function parseArgs(argv: string[]): ParsedArgs {
   const projectRoot = argv[0];
-  if (!projectRoot) {
+  if (!projectRoot || projectRoot.startsWith("--")) {
     throw new Error(
       "Usage: product-index-cli <project-root> [--platform android] [--fast]",
     );
@@ -205,6 +210,34 @@ function getNumberFlagValue(
     throw new Error(`${flag} must be a positive integer: ${raw}`);
   }
   return value;
+}
+
+function sanitiseKnowledgeGraphFilePaths(
+  graph: KnowledgeGraph,
+  projectRoot: string,
+): KnowledgeGraph {
+  return {
+    ...graph,
+    nodes: graph.nodes.map((node) => {
+      if (typeof node.filePath !== "string") {
+        return node;
+      }
+
+      const safeFilePath = getSafeSignalFilePath(node.filePath, projectRoot);
+      if (safeFilePath) {
+        return safeFilePath === node.filePath
+          ? node
+          : { ...node, filePath: safeFilePath };
+      }
+
+      if (node.id) {
+        const { filePath: _filePath, ...rest } = node;
+        return rest;
+      }
+
+      throw new Error(`Invalid knowledge graph node filePath: ${node.filePath}`);
+    }),
+  };
 }
 
 function sanitiseProductSignals(
