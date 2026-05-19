@@ -215,7 +215,7 @@ describe("product index chat context", () => {
         {
           ...productIndex.evidence[0],
           id: "ev:cast-button",
-          role: "related",
+          role: "ui",
           filePath: "player/CastButton.kt",
           symbol: "renderCastButton",
           lineRange: [20, 42],
