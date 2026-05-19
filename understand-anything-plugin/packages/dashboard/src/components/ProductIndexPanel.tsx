@@ -41,18 +41,32 @@ function findEvidenceTarget(
     if (item.nodeId && nodesById.has(item.nodeId)) {
       return item.nodeId;
     }
-
-    if (!item.filePath) continue;
-    const evidencePath = normalizeFilePath(item.filePath);
-    const node = graph.nodes.find((candidate) => {
-      if (!candidate.filePath) return false;
-      const nodePath = normalizeFilePath(candidate.filePath);
-      return nodePath === evidencePath || nodePath.endsWith(`/${evidencePath}`);
-    });
-    if (node) return node.id;
   }
 
-  return null;
+  for (const item of evidence) {
+    if (!item.filePath) continue;
+    const evidencePath = normalizeFilePath(item.filePath);
+    const exactNode = graph.nodes.find((candidate) => {
+      if (!candidate.filePath) return false;
+      return normalizeFilePath(candidate.filePath) === evidencePath;
+    });
+    if (exactNode) return exactNode.id;
+  }
+
+  const suffixMatchIds = new Set<string>();
+  for (const item of evidence) {
+    if (!item.filePath) continue;
+    const evidencePath = normalizeFilePath(item.filePath);
+    const suffixMatches = graph.nodes.filter((candidate) => {
+      if (!candidate.filePath) return false;
+      return normalizeFilePath(candidate.filePath).endsWith(`/${evidencePath}`);
+    });
+    for (const node of suffixMatches) {
+      suffixMatchIds.add(node.id);
+    }
+  }
+
+  return suffixMatchIds.size === 1 ? Array.from(suffixMatchIds)[0] : null;
 }
 
 export default function ProductIndexPanel() {

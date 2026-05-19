@@ -182,21 +182,42 @@ function Dashboard({ accessToken }: { accessToken: string }) {
   }, [setDiffOverlay]);
 
   useEffect(() => {
-    fetch(dataUrl("product-index.json", accessToken))
+    const controller = new AbortController();
+    let cancelled = false;
+    setProductIndex(null);
+
+    fetch(dataUrl("product-index.json", accessToken), { signal: controller.signal })
       .then((res) => {
-        if (!res.ok) return null;
+        if (!res.ok) {
+          if (!cancelled) setProductIndex(null);
+          return null;
+        }
         return res.json();
       })
       .then((data: unknown) => {
-        if (!data) return;
+        if (cancelled || !data) return;
         const result = validateProductIndex(data);
         if (result.success) {
           setProductIndex(result.data);
         } else {
           console.warn(`[product-index] validation failed: ${result.error}`);
+          setProductIndex(null);
         }
       })
-      .catch(() => {});
+      .catch((err: unknown) => {
+        if (
+          cancelled ||
+          (err instanceof DOMException && err.name === "AbortError")
+        ) {
+          return;
+        }
+        setProductIndex(null);
+      });
+
+    return () => {
+      cancelled = true;
+      controller.abort();
+    };
   }, [accessToken, setProductIndex]);
 
   useEffect(() => {

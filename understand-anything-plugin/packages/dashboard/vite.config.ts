@@ -255,7 +255,6 @@ export default defineConfig({
             pathname === "/meta.json" ||
             pathname === "/config.json" ||
             pathname === "/product-index.json" ||
-            pathname === "/product-signals.jsonl" ||
             pathname === "/file-content.json";
 
           if (!isProtectedEndpoint) {
@@ -291,19 +290,6 @@ export default defineConfig({
               }
             }
             sendJson(res, 200, { autoUpdate: false, outputLanguage: "zh" });
-            return;
-          }
-
-          if (pathname === "/product-signals.jsonl") {
-            const signalFile = findGraphFile("product-signals.jsonl");
-            if (!signalFile) {
-              res.statusCode = 404;
-              res.end();
-              return;
-            }
-            res.statusCode = 200;
-            res.setHeader("Content-Type", "application/x-ndjson");
-            res.end(fs.readFileSync(signalFile, "utf-8"));
             return;
           }
 
