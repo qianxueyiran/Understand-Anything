@@ -58,6 +58,8 @@ describe("grounded product index cli", () => {
     ]);
 
     expect(result.contextPacks).toBeGreaterThan(0);
+    expect(result.facts).toBe(0);
+    expect(result.evidence).toBe(0);
     expect(
       existsSync(
         join(
@@ -66,6 +68,9 @@ describe("grounded product index cli", () => {
         ),
       ),
     ).toBe(true);
+    expect(
+      existsSync(join(projectRoot, ".understand-anything/product-index.json")),
+    ).toBe(false);
   });
 
   it("finalizes product index from extraction file", async () => {
