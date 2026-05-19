@@ -1,7 +1,11 @@
 import { useEffect, useState, useMemo, useCallback, lazy, Suspense } from "react";
-import { validateProductIndex } from "@understand-anything/core/product-index";
+import {
+  validateProductIndex,
+  type ProductIndex,
+} from "@understand-anything/core/product-index";
 import { validateGraph } from "@understand-anything/core/schema";
 import type { GraphIssue } from "@understand-anything/core/schema";
+import type { KnowledgeGraph } from "@understand-anything/core/types";
 import { useDashboardStore } from "./store";
 import GraphView from "./components/GraphView";
 import DomainGraphView from "./components/DomainGraphView";
@@ -78,6 +82,28 @@ function resolveInitialToken(): string | null {
   return sessionStorage.getItem(SESSION_TOKEN_KEY);
 }
 
+function productIndexMatchesGraph(
+  productIndex: ProductIndex,
+  graph: KnowledgeGraph,
+): boolean {
+  const graphCommitHash = graph.project.gitCommitHash?.trim();
+  const productCommitHash =
+    productIndex.sources.knowledgeGraph.gitCommitHash?.trim() ??
+    productIndex.project.gitCommitHash?.trim();
+
+  if (graphCommitHash) {
+    return productCommitHash === graphCommitHash;
+  }
+
+  const graphAnalyzedAt = graph.project.analyzedAt?.trim();
+  const productAnalyzedAt = productIndex.project.analyzedAt?.trim();
+  if (graphAnalyzedAt && productAnalyzedAt) {
+    return graphAnalyzedAt === productAnalyzedAt;
+  }
+
+  return true;
+}
+
 function App() {
   const [accessToken, setAccessToken] = useState<string | null>(resolveInitialToken);
 
@@ -100,6 +126,7 @@ function App() {
 }
 
 function Dashboard({ accessToken }: { accessToken: string }) {
+  const graph = useDashboardStore((s) => s.graph);
   const setGraph = useDashboardStore((s) => s.setGraph);
   const setProductIndex = useDashboardStore((s) => s.setProductIndex);
   const setDomainGraph = useDashboardStore((s) => s.setDomainGraph);
@@ -182,9 +209,11 @@ function Dashboard({ accessToken }: { accessToken: string }) {
   }, [setDiffOverlay]);
 
   useEffect(() => {
+    setProductIndex(null);
+    if (!graph) return;
+
     const controller = new AbortController();
     let cancelled = false;
-    setProductIndex(null);
 
     fetch(dataUrl("product-index.json", accessToken), { signal: controller.signal })
       .then((res) => {
@@ -198,7 +227,14 @@ function Dashboard({ accessToken }: { accessToken: string }) {
         if (cancelled || !data) return;
         const result = validateProductIndex(data);
         if (result.success) {
-          setProductIndex(result.data);
+          if (productIndexMatchesGraph(result.data, graph)) {
+            setProductIndex(result.data);
+          } else {
+            console.warn(
+              "[product-index] stale index ignored. Run /understand-product again.",
+            );
+            setProductIndex(null);
+          }
         } else {
           console.warn(`[product-index] validation failed: ${result.error}`);
           setProductIndex(null);
@@ -218,7 +254,7 @@ function Dashboard({ accessToken }: { accessToken: string }) {
       cancelled = true;
       controller.abort();
     };
-  }, [accessToken, setProductIndex]);
+  }, [accessToken, graph, setProductIndex]);
 
   useEffect(() => {
     fetch(dataUrl("domain-graph.json", accessToken))

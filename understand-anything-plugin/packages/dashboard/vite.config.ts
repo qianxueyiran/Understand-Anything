@@ -5,6 +5,11 @@ import tailwindcss from "@tailwindcss/vite";
 import path from "path";
 import fs from "fs";
 import crypto from "crypto";
+import {
+  validateProductIndex,
+  type ProductEvidence,
+  type ProductIndex,
+} from "@understand-anything/core/product-index";
 
 // Generate a one-time token when the server process starts.
 // This token is printed to the terminal and must be in the URL
@@ -50,6 +55,81 @@ function normalizeGraphPath(filePath: string, projectRoot: string): string | nul
     return null;
   }
   return normalized.split(path.sep).join("/");
+}
+
+function sanitiseProductIndexForResponse(
+  data: unknown,
+  projectRoot: string,
+): ProductIndex {
+  const initialResult = validateProductIndex(data);
+  if (!initialResult.success) {
+    throw new Error(`Invalid product index: ${initialResult.error}`);
+  }
+
+  const evidence = initialResult.data.evidence.map((item) =>
+    sanitiseProductEvidenceForResponse(item, projectRoot),
+  );
+  const sanitised = { ...initialResult.data, evidence };
+  const finalResult = validateProductIndex(sanitised);
+  if (!finalResult.success) {
+    throw new Error(`Invalid product index after path sanitisation: ${finalResult.error}`);
+  }
+  return finalResult.data;
+}
+
+function sanitiseProductEvidenceForResponse(
+  evidence: ProductEvidence,
+  projectRoot: string,
+): ProductEvidence {
+  if (typeof evidence.filePath !== "string") {
+    return evidence;
+  }
+
+  const safeFilePath = getSafeProductEvidenceFilePath(evidence.filePath, projectRoot);
+  if (safeFilePath) {
+    return {
+      ...evidence,
+      filePath: safeFilePath,
+      tokens: [],
+    };
+  }
+
+  if (evidence.nodeId) {
+    const { filePath: _filePath, ...rest } = evidence;
+    return { ...rest, tokens: [] };
+  }
+
+  throw new Error(`Invalid product evidence filePath: ${evidence.filePath}`);
+}
+
+function getSafeProductEvidenceFilePath(
+  filePath: string,
+  projectRoot: string,
+): string | null {
+  if (
+    /^[a-zA-Z]:/.test(filePath) ||
+    filePath.startsWith("\\\\") ||
+    filePath.includes("\\") ||
+    filePath.includes("\0")
+  ) {
+    return null;
+  }
+
+  if (path.isAbsolute(filePath)) {
+    const relativePath = path.relative(path.resolve(projectRoot), filePath);
+    return isUnsafeProductRelativePath(relativePath) ? null : relativePath;
+  }
+
+  return isUnsafeProductRelativePath(filePath) ? null : filePath;
+}
+
+function isUnsafeProductRelativePath(filePath: string): boolean {
+  const parts = filePath.split("/");
+  return (
+    !filePath ||
+    filePath.startsWith("/") ||
+    parts.some((part) => part === "" || part === "..")
+  );
 }
 
 function graphFilePathSet(graphFile: string, projectRoot: string): Set<string> {
@@ -322,6 +402,11 @@ export default defineConfig({
               // Derive the project root from the candidate path so we can
               // make file paths relative to it.
               const projectRoot = projectRootFromGraphFile(candidate);
+
+              if (pathname === "/product-index.json") {
+                sendJson(res, 200, sanitiseProductIndexForResponse(raw, projectRoot));
+                return;
+              }
 
               if (Array.isArray(raw.nodes)) {
                 raw.nodes = raw.nodes.map((node) => {

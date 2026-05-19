@@ -4,6 +4,7 @@ import type { ProductIndex } from "@understand-anything/core/product-index";
 import {
   buildProductIndexChatContext,
   formatProductIndexContextForPrompt,
+  isProductIndexCurrentForGraph,
 } from "../product-index-context-builder.js";
 import {
   buildChatPrompt,
@@ -203,6 +204,39 @@ describe("product index chat context", () => {
     });
 
     expect(prompt).toBe(buildChatPrompt(graph, "购物车优惠券在哪里"));
+  });
+
+  it("ignores a product index generated for a different graph commit", () => {
+    const staleIndex: ProductIndex = {
+      ...productIndex,
+      project: {
+        ...productIndex.project,
+        gitCommitHash: "old-commit",
+      },
+      sources: {
+        ...productIndex.sources,
+        knowledgeGraph: {
+          ...productIndex.sources.knowledgeGraph,
+          gitCommitHash: "old-commit",
+        },
+      },
+    };
+
+    const ctx = buildProductIndexChatContext({
+      graph,
+      productIndex: staleIndex,
+      query: "如何开启投屏功能",
+    });
+
+    expect(isProductIndexCurrentForGraph(staleIndex, graph)).toBe(false);
+    expect(ctx.productResults).toEqual([]);
+    expect(
+      buildProductAwareChatPrompt({
+        graph,
+        productIndex: staleIndex,
+        query: "如何开启投屏功能",
+      }),
+    ).toBe(buildChatPrompt(graph, "如何开启投屏功能"));
   });
 
   it("finds evidence nodes by file path and symbol when nodeId is absent", () => {

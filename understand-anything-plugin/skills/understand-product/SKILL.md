@@ -1,7 +1,7 @@
 ---
 name: understand-product
 description: 基于已有 /understand 知识图谱生成产品知识索引，用于回答客户端产品问题。
-argument-hint: [--platform android] [--fast] [--full] [--topic <name>]
+argument-hint: [--platform android] [--fast] [--entry-patterns <patterns>]
 ---
 
 # /understand-product
@@ -23,10 +23,21 @@ fi
 
 ## Phase 1: 确定性生成产品索引草稿
 
+支持的参数会透传给 CLI：
+
+- `--platform <name>`，默认 `android`
+- `--fast`，只执行确定性索引阶段
+- `--entry-patterns <comma-separated patterns>`
+- `--max-depth <positive integer>`
+- `--max-nodes-per-topic <positive integer>`
+- `--max-frontier-per-depth <positive integer>`
+- `--max-evidence-per-topic <positive integer>`
+- `--hub-degree-threshold <positive integer>`
+
 运行：
 
 ```bash
-node "$PLUGIN_ROOT/dist/product-index-cli.js" "$PROJECT_ROOT" --platform android --fast
+node "$PLUGIN_ROOT/dist/product-index-cli.js" "$PROJECT_ROOT" $ARGUMENTS
 ```
 
 该命令生成：

@@ -44,7 +44,7 @@ export interface ProductIndexChatContext {
 export function buildProductIndexChatContext(
   input: ProductIndexChatContextInput,
 ): ProductIndexChatContext {
-  const productResults = input.productIndex
+  const productResults = input.productIndex && isProductIndexCurrentForGraph(input.productIndex, input.graph)
     ? searchProductIndex(input.productIndex, input.query, MAX_PRODUCT_RESULTS).map(
         limitProductResult,
       )
@@ -73,6 +73,28 @@ export function buildProductIndexChatContext(
       MAX_CODE_EVIDENCE_NODES,
     ),
   };
+}
+
+export function isProductIndexCurrentForGraph(
+  productIndex: ProductIndex,
+  graph: KnowledgeGraph,
+): boolean {
+  const graphCommitHash = graph.project.gitCommitHash?.trim();
+  const productCommitHash =
+    productIndex.sources.knowledgeGraph.gitCommitHash?.trim() ??
+    productIndex.project.gitCommitHash?.trim();
+
+  if (graphCommitHash) {
+    return productCommitHash === graphCommitHash;
+  }
+
+  const graphAnalyzedAt = graph.project.analyzedAt?.trim();
+  const productAnalyzedAt = productIndex.project.analyzedAt?.trim();
+  if (graphAnalyzedAt && productAnalyzedAt) {
+    return graphAnalyzedAt === productAnalyzedAt;
+  }
+
+  return true;
 }
 
 export function formatProductIndexContextForPrompt(

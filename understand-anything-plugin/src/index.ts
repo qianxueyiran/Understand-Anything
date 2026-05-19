@@ -6,6 +6,7 @@ export {
 export {
   buildProductIndexChatContext,
   formatProductIndexContextForPrompt,
+  isProductIndexCurrentForGraph,
   type ProductIndexChatContext,
   type ProductIndexChatContextInput,
 } from "./product-index-context-builder.js";
