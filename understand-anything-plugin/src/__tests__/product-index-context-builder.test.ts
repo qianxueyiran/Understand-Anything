@@ -162,6 +162,37 @@ describe("product index chat context", () => {
     );
   });
 
+  it("uses grounded fact evidence even when topic evidence is minimal", () => {
+    const groundedIndex: ProductIndex = {
+      ...productIndex,
+      topics: [
+        {
+          ...productIndex.topics[0],
+          aliases: [...productIndex.topics[0].aliases, "投屏入口在哪里"],
+          factIds: ["fact:casting-entry"],
+          evidenceIds: ["ev:player-entry"],
+        },
+      ],
+      facts: [
+        {
+          ...productIndex.facts[0],
+          evidenceIds: ["ev:player-entry"],
+        },
+      ],
+    };
+
+    const ctx = buildProductIndexChatContext({
+      graph,
+      productIndex: groundedIndex,
+      query: "投屏入口在哪里",
+    });
+
+    expect(ctx.productResults[0].facts[0].text).toContain("播放页提供投屏入口");
+    expect(ctx.codeEvidenceNodes.map((node) => node.id)).toContain(
+      "class:player/PlayerActivity.kt:PlayerActivity",
+    );
+  });
+
   it("formats product topics, facts, and evidence locations for prompt", () => {
     const ctx = buildProductIndexChatContext({
       graph,

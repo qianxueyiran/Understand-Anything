@@ -79,6 +79,10 @@ export default function ProductIndexPanel() {
     () => new Map((productIndex?.evidence ?? []).map((evidence) => [evidence.id, evidence])),
     [productIndex],
   );
+  const factsById = useMemo(
+    () => new Map((productIndex?.facts ?? []).map((fact) => [fact.id, fact])),
+    [productIndex],
+  );
 
   const topics = useMemo(() => {
     if (!productIndex) return [];
@@ -123,6 +127,9 @@ export default function ProductIndexPanel() {
             )
               .map((id) => evidenceById.get(id))
               .filter((item): item is ProductEvidence => Boolean(item));
+            const facts = (topic.factIds ?? [])
+              .map((id) => factsById.get(id))
+              .filter(Boolean);
             const evidenceTarget = findEvidenceTarget(topicEvidence, graph);
             const extraAliasCount = Math.max(0, topic.aliases.length - ALIAS_LIMIT);
 
@@ -163,9 +170,13 @@ export default function ProductIndexPanel() {
                 )}
 
                 <div className="flex items-center justify-between gap-3 text-[11px]">
-                  <span className="font-mono text-text-muted">
-                    {topicEvidence.length} evidence
-                  </span>
+                  <div className="min-w-0">
+                    <div className="font-medium text-text-secondary">Fact Evidence</div>
+                    <div className="font-mono text-text-muted">
+                      {topic.factIds?.length ?? facts.length} facts · {topic.evidenceIds.length}{" "}
+                      evidence refs
+                    </div>
+                  </div>
                   {evidenceTarget ? (
                     <button
                       type="button"

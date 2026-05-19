@@ -51,14 +51,36 @@ export function buildProductIndexChatContext(
     : [];
 
   const domainIds = new Set<string>();
-  const evidenceRefs: ProductEvidence[] = [];
+  const evidenceIds = new Set<string>();
 
   for (const result of productResults) {
     for (const domainRef of result.topic.domainRefs) {
       domainIds.add(domainRef);
     }
-    evidenceRefs.push(...result.evidence);
+    for (const fact of result.facts) {
+      for (const evidenceId of fact.evidenceIds) {
+        evidenceIds.add(evidenceId);
+      }
+    }
+    for (const evidenceId of result.topic.entryEvidenceIds) {
+      evidenceIds.add(evidenceId);
+    }
   }
+
+  if (evidenceIds.size === 0) {
+    for (const result of productResults) {
+      for (const evidenceId of result.topic.evidenceIds) {
+        evidenceIds.add(evidenceId);
+      }
+    }
+  }
+
+  const evidenceById = new Map(
+    (input.productIndex?.evidence ?? []).map((evidence) => [evidence.id, evidence]),
+  );
+  const evidenceRefs = Array.from(evidenceIds)
+    .map((id) => evidenceById.get(id))
+    .filter((item): item is ProductEvidence => Boolean(item));
 
   return {
     query: input.query,
