@@ -1,12 +1,28 @@
 import Fuse, { type IFuseOptions } from "fuse.js";
 import { z } from "zod";
 
-export const ProductTopicKindSchema = z.enum(["capability", "surface", "element", "data"]);
+export const ProductTopicKindSchema = z.enum([
+  "capability",
+  "surface",
+  "element",
+  "data",
+  "integration",
+]);
 export const ProductTopicStatusSchema = z.enum(["seeded", "indexed", "summarized", "verified"]);
-export const ProductFactTypeSchema = z.enum(["behavior", "rule", "display", "mapping", "lifecycle"]);
+export const ProductFactTypeSchema = z.enum([
+  "behavior",
+  "rule",
+  "display",
+  "data",
+  "integration",
+  "mapping",
+  "lifecycle",
+]);
 export const ProductConfidenceSchema = z.enum(["confirmed", "inferred", "uncertain"]);
 export const ProductFactMaturitySchema = z.enum(["indexed", "summarized", "verified"]);
 export const ProductEvidenceRoleSchema = z.enum([
+  "behavior",
+  "display",
   "entry",
   "copy",
   "ui",
@@ -52,9 +68,11 @@ export const ProductEvidenceSchema = z
     symbol: z.string().min(1).optional(),
     lineRange: z.tuple([z.number().int().positive(), z.number().int().positive()]).optional(),
     nodeId: z.string().min(1).optional(),
+    nodeIds: z.array(z.string().min(1)).default([]),
     signalTypes: z.array(ProductSignalTypeSchema).default([]),
     tokens: z.array(z.string().min(1)).default([]),
     reason: z.string().min(1),
+    summary: z.string().min(1).optional(),
     confidence: ProductConfidenceSchema,
   })
   .superRefine((evidence, ctx) => {
@@ -82,6 +100,8 @@ export const ProductTopicSchema = z.object({
   aliases: z.array(z.string().min(1)).default([]),
   summary: z.string().min(1),
   status: ProductTopicStatusSchema,
+  sourceCandidateIds: z.array(z.string().min(1)).default([]),
+  factIds: z.array(z.string().min(1)).default([]),
   entryEvidenceIds: z.array(z.string().min(1)).default([]),
   evidenceIds: z.array(z.string().min(1)).default([]),
   domainRefs: z.array(z.string().min(1)).default([]),
@@ -123,6 +143,14 @@ export const ProductCoverageSchema = z.object({
   warnings: z.array(ProductCoverageWarningSchema).default([]),
 });
 
+export const ProductQualitySchema = z
+  .object({
+    groundedFacts: z.number().int().nonnegative().default(0),
+    ignoredFiles: z.number().int().nonnegative().default(0),
+    overflowFiles: z.number().int().nonnegative().default(0),
+  })
+  .passthrough();
+
 export const ProductProjectSchema = z.object({
   name: z.string().min(1),
   platforms: z.array(z.string().min(1)).default([]),
@@ -153,6 +181,7 @@ export const ProductIndexSchema = z
     facts: z.array(ProductFactSchema).default([]),
     evidence: z.array(ProductEvidenceSchema).default([]),
     coverage: ProductCoverageSchema,
+    quality: ProductQualitySchema.optional(),
   })
   .superRefine((index, ctx) => {
     const seenTopicIds = new Set<string>();
@@ -205,6 +234,16 @@ export const ProductIndexSchema = z
           });
         }
       }
+
+      for (const factId of topic.factIds) {
+        if (!seenFactIds.has(factId)) {
+          ctx.addIssue({
+            code: "custom",
+            message: `topic ${topic.id} references unknown fact id ${factId}`,
+            path: ["topics"],
+          });
+        }
+      }
     }
 
     for (const fact of index.facts) {
@@ -243,6 +282,7 @@ export type ProductTopic = z.infer<typeof ProductTopicSchema>;
 export type ProductFact = z.infer<typeof ProductFactSchema>;
 export type ProductCoverageWarning = z.infer<typeof ProductCoverageWarningSchema>;
 export type ProductCoverage = z.infer<typeof ProductCoverageSchema>;
+export type ProductQuality = z.infer<typeof ProductQualitySchema>;
 export type ProductProject = z.infer<typeof ProductProjectSchema>;
 export type ProductSignal = z.infer<typeof ProductSignalSchema>;
 export type ProductIndex = z.infer<typeof ProductIndexSchema>;

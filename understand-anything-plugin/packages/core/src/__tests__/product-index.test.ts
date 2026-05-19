@@ -104,6 +104,86 @@ describe("ProductIndex schema", () => {
     expect(result.data?.topics[0].name).toBe("投屏");
   });
 
+  it("validates grounded topics, facts, and evidence", () => {
+    const result = validateProductIndex({
+      version: "1.0.0",
+      kind: "product-index",
+      project: {
+        name: "video-app",
+        platforms: ["android"],
+        languages: ["java"],
+        frameworks: ["Android"],
+        analyzedAt: "2026-05-19T00:00:00.000Z",
+        gitCommitHash: "abc123",
+      },
+      sources: {
+        knowledgeGraph: {
+          path: ".understand-anything/knowledge-graph.json",
+          gitCommitHash: "abc123",
+          required: true,
+        },
+      },
+      topics: [
+        {
+          id: "topic:boot-receiver",
+          kind: "capability",
+          name: "开机广播调起",
+          aliases: [],
+          summary: "开机广播触发首页初始化相关业务。",
+          status: "indexed",
+          sourceCandidateIds: ["candidate:BootBroadcastReceiver"],
+          factIds: ["fact:boot-receiver-entry"],
+          entryEvidenceIds: ["evidence:BootBroadcastReceiver.onReceive"],
+          evidenceIds: ["evidence:BootBroadcastReceiver.onReceive"],
+          domainRefs: [],
+        },
+      ],
+      facts: [
+        {
+          id: "fact:boot-receiver-entry",
+          topicIds: ["topic:boot-receiver"],
+          type: "behavior",
+          text: "应用接收开机广播后会启动后续首页初始化处理。",
+          conditions: ["系统发出开机广播"],
+          evidenceIds: ["evidence:BootBroadcastReceiver.onReceive"],
+          confidence: "confirmed",
+          maturity: "indexed",
+        },
+      ],
+      evidence: [
+        {
+          id: "evidence:BootBroadcastReceiver.onReceive",
+          role: "behavior",
+          filePath: "app/BootBroadcastReceiver.java",
+          symbol: "onReceive",
+          lineRange: [18, 21],
+          nodeId: "function:BootBroadcastReceiver.java:onReceive",
+          nodeIds: ["function:BootBroadcastReceiver.java:onReceive"],
+          signalTypes: ["behavior"],
+          tokens: [],
+          reason: "接收开机广播并启动后续处理。",
+          summary: "接收开机广播并启动后续处理。",
+          confidence: "confirmed",
+        },
+      ],
+      coverage: {
+        platformProfiles: ["android"],
+        entryPoints: 1,
+        indexedTopics: 1,
+        confirmedEvidence: 1,
+        generatedFacts: 1,
+        warnings: [],
+      },
+      quality: {
+        groundedFacts: 1,
+        ignoredFiles: 0,
+        overflowFiles: 0,
+      },
+    });
+
+    expect(result.success).toBe(true);
+  });
+
   it("rejects confirmed fact without evidence ids", () => {
     const invalid: ProductIndex = {
       ...sampleIndex,
