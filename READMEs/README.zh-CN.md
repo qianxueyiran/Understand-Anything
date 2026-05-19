@@ -151,9 +151,14 @@ Understand Anything 是一个 [Claude Code Plugin](https://code.claude.com/docs/
 # 提取业务领域知识（领域、流程、步骤）
 /understand-domain
 
+# 生成客户端产品问题的产品知识索引
+/understand-product --platform android
+
 # 分析 Karpathy 模式的 LLM Wiki 知识库
 /understand-knowledge ~/path/to/wiki
 ```
+
+`/understand-product` 会生成 `.understand-anything/product-index.json`，用于把产品主题、候选事实和代码证据建立索引。它要求先运行 `/understand`，不会改变 `/understand` 默认流程。
 
 ---
 

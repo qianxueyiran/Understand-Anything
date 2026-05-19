@@ -153,9 +153,14 @@ An interactive web dashboard opens with your codebase visualized as a graph — 
 # Extract business domain knowledge (domains, flows, steps)
 /understand-domain
 
+# Generate a product knowledge index for client product questions
+/understand-product --platform android
+
 # Analyze a Karpathy-pattern LLM wiki knowledge base
 /understand-knowledge ~/path/to/wiki
 ```
+
+`/understand-product` builds `.understand-anything/product-index.json`, a product knowledge index that maps product topics, candidate facts, and code evidence. It requires `/understand` to run first and does not change the default `/understand` pipeline.
 
 ---
 
