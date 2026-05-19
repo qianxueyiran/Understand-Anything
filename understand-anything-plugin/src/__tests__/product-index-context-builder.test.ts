@@ -169,8 +169,9 @@ describe("product index chat context", () => {
         {
           ...productIndex.topics[0],
           aliases: [...productIndex.topics[0].aliases, "投屏入口在哪里"],
+          entryEvidenceIds: [],
           factIds: ["fact:casting-entry"],
-          evidenceIds: ["ev:player-entry"],
+          evidenceIds: [],
         },
       ],
       facts: [
