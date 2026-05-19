@@ -260,4 +260,70 @@ describe("grounded product index builder", () => {
     expect(index.evidence).toHaveLength(0);
     expect(index.coverage.warnings.some((warning) => warning.code === "fact-without-evidence")).toBe(true);
   });
+
+  it("merges repeated evidence confidence using the highest confidence independent of fact order", () => {
+    const kg = graph([
+      {
+        id: "function:BootBroadcastReceiver.java:onReceive",
+        type: "function",
+        name: "onReceive",
+        filePath: "app/BootBroadcastReceiver.java",
+        lineRange: [18, 21],
+        summary: "Receives boot broadcasts.",
+        tags: ["receiver"],
+        complexity: "simple",
+        businessSignals: [{ type: "behavior", text: "接收开机广播并启动后续处理" }],
+      },
+    ]);
+    const topic = {
+      id: "topic:boot-receiver",
+      name: "开机广播调起",
+      summary: "开机广播触发首页初始化相关业务。",
+      kind: "capability" as const,
+      sourceCandidateIds: ["candidate:BootBroadcastReceiver"],
+      rootNodeIds: ["function:BootBroadcastReceiver.java:onReceive"],
+      domainRefs: [],
+    };
+    const packs = buildTopicContextPacks(kg, [topic]);
+    const evidenceRef = packs[0].candidateFiles[0].anchors[0].anchorId;
+    const inferredFact = {
+      type: "behavior" as const,
+      text: "开机广播可能触发首页初始化。",
+      conditions: ["系统发出开机广播"],
+      evidenceRefs: [evidenceRef],
+      confidence: "inferred" as const,
+    };
+    const confirmedFact = {
+      type: "behavior" as const,
+      text: "开机广播会触发首页初始化。",
+      conditions: ["系统发出开机广播"],
+      evidenceRefs: [evidenceRef],
+      confidence: "confirmed" as const,
+    };
+    const finalize = (facts: [typeof inferredFact, typeof confirmedFact] | [typeof confirmedFact, typeof inferredFact]) =>
+      finalizeGroundedProductIndex({
+        graph: kg,
+        topics: [topic],
+        contextPacks: packs,
+        extractions: [
+          {
+            topicId: "topic:boot-receiver",
+            usedFiles: [{ fileId: "file:app/BootBroadcastReceiver.java", reason: "承载开机广播接收" }],
+            ignoredFiles: [],
+            facts,
+          },
+        ],
+        options: { platform: "android", analyzedAt: "2026-05-19T00:00:00.000Z" },
+      });
+
+    const inferredFirstIndex = finalize([inferredFact, confirmedFact]);
+    const confirmedFirstIndex = finalize([confirmedFact, inferredFact]);
+
+    for (const index of [inferredFirstIndex, confirmedFirstIndex]) {
+      expect(index.facts).toHaveLength(2);
+      expect(index.evidence).toHaveLength(1);
+      expect(index.evidence[0].confidence).toBe("confirmed");
+      expect(index.coverage.confirmedEvidence).toBe(1);
+    }
+  });
 });

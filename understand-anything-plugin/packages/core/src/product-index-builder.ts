@@ -499,7 +499,13 @@ export function finalizeGroundedProductIndex(input: FinalizeGroundedProductIndex
 
       const evidenceIds = anchors.map((anchor) => {
         const evidence = buildEvidenceFromAnchor(anchor, nodeById.get(anchor.nodeId), extractionFact.confidence);
-        if (!evidenceById.has(evidence.id)) {
+        const existingEvidence = evidenceById.get(evidence.id);
+        if (existingEvidence) {
+          existingEvidence.confidence = highestEvidenceConfidence(
+            existingEvidence.confidence,
+            evidence.confidence,
+          );
+        } else {
           evidenceById.set(evidence.id, evidence);
         }
         return evidence.id;
@@ -1202,6 +1208,18 @@ function evidenceIdForAnchor(anchor: ProductContextAnchor): string {
 
 function evidenceRoleFromAnchorType(anchorType: ProductContextAnchor["type"]): ProductEvidenceRole {
   return anchorType;
+}
+
+function highestEvidenceConfidence(
+  a: ProductEvidence["confidence"],
+  b: ProductEvidence["confidence"],
+): ProductEvidence["confidence"] {
+  const rank: Record<ProductEvidence["confidence"], number> = {
+    uncertain: 0,
+    inferred: 1,
+    confirmed: 2,
+  };
+  return rank[a] >= rank[b] ? a : b;
 }
 
 function buildEvidenceFromNode(
