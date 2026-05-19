@@ -915,6 +915,31 @@ class BusinessSignalMergeTests(unittest.TestCase):
         self.assertNotIn("", {s["text"] for s in merged["businessSignals"]})
         self.assertTrue(any("businessSignals" in line for line in report))
 
+    def test_drops_unhashable_type_and_dedupes_after_text_truncation(self):
+        prefix = "业务流程" * 10
+        self.assertEqual(len(prefix), 40)
+        shared_prefix = prefix * 2
+        self.assertEqual(len(shared_prefix), 80)
+        node = {
+            "id": "file:src/HomeActivity.kt",
+            "type": "file",
+            "name": "HomeActivity.kt",
+            "filePath": "src/HomeActivity.kt",
+            "summary": "Home entry.",
+            "tags": [],
+            "complexity": "simple",
+            "businessSignals": [
+                {"type": [], "text": "不可哈希类型"},
+                {"type": "display", "text": f"{shared_prefix}甲"},
+                {"type": "display", "text": f"{shared_prefix}乙"},
+            ],
+        }
+
+        assembled, _report = mbg.merge_and_normalize([{"nodes": [node], "edges": []}])
+        signals = assembled["nodes"][0]["businessSignals"]
+
+        self.assertEqual(signals, [{"type": "display", "text": shared_prefix}])
+
 
 if __name__ == "__main__":
     unittest.main()

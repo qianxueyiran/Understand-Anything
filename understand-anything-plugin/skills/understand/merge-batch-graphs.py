@@ -253,15 +253,21 @@ def normalize_business_signals(node: dict[str, Any]) -> tuple[list[dict[str, str
             continue
         signal_type = item.get("type")
         text = item.get("text")
-        if signal_type not in BUSINESS_SIGNAL_TYPES or not isinstance(text, str) or not text.strip():
+        if (
+            not isinstance(signal_type, str)
+            or signal_type not in BUSINESS_SIGNAL_TYPES
+            or not isinstance(text, str)
+            or not text.strip()
+        ):
             dropped += 1
             continue
-        key = (signal_type, text.strip())
+        cleaned_text = text.strip()[:80]
+        key = (signal_type, cleaned_text)
         if key in seen:
             dropped += 1
             continue
         seen.add(key)
-        normalized.append({"type": signal_type, "text": text.strip()[:80]})
+        normalized.append({"type": signal_type, "text": cleaned_text})
         if len(normalized) >= cap:
             break
 
