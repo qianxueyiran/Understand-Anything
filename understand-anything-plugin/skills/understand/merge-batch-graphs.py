@@ -77,6 +77,9 @@ COMPLEXITY_MAP: dict[str, str] = {
 
 VALID_COMPLEXITY = {"simple", "moderate", "complex"}
 
+BUSINESS_SIGNAL_TYPES = {"entry", "behavior", "rule", "display", "data", "integration"}
+BUSINESS_SIGNAL_CAPS = {"file": 8, "class": 3, "function": 1}
+
 
 # ── tested_by linker configuration ────────────────────────────────────────
 
@@ -232,6 +235,39 @@ def normalize_complexity(value: Any) -> tuple[str, str]:
             return "complex", "mapped"
     # None or other type — default but flag it
     return "moderate", "unknown"
+
+
+def normalize_business_signals(node: dict[str, Any]) -> tuple[list[dict[str, str]], int]:
+    raw = node.get("businessSignals")
+    if not isinstance(raw, list):
+        return [], 0
+
+    cap = BUSINESS_SIGNAL_CAPS.get(str(node.get("type", "")), 3)
+    normalized: list[dict[str, str]] = []
+    seen: set[tuple[str, str]] = set()
+    dropped = 0
+
+    for item in raw:
+        if not isinstance(item, dict):
+            dropped += 1
+            continue
+        signal_type = item.get("type")
+        text = item.get("text")
+        if signal_type not in BUSINESS_SIGNAL_TYPES or not isinstance(text, str) or not text.strip():
+            dropped += 1
+            continue
+        key = (signal_type, text.strip())
+        if key in seen:
+            dropped += 1
+            continue
+        seen.add(key)
+        normalized.append({"type": signal_type, "text": text.strip()[:80]})
+        if len(normalized) >= cap:
+            break
+
+    if len(raw) > len(normalized) + dropped:
+        dropped += len(raw) - len(normalized) - dropped
+    return normalized, dropped
 
 
 # ── Deterministic tested_by linker ────────────────────────────────────────
@@ -766,6 +802,19 @@ def merge_and_normalize(batches: list[dict[str, Any]]) -> tuple[dict[str, Any], 
 
         node["complexity"] = normalized
 
+    # ── Step 3b: Normalize business signals ──────────────────────────
+    business_signal_nodes = 0
+    business_signal_dropped = 0
+
+    for node in nodes_with_ids:
+        normalized_signals, dropped = normalize_business_signals(node)
+        business_signal_dropped += dropped
+        if normalized_signals:
+            node["businessSignals"] = normalized_signals
+            business_signal_nodes += 1
+        else:
+            node.pop("businessSignals", None)
+
     # ── Step 4: Rewrite edge references ──────────────────────────────
     edges_rewritten = 0
     for edge in all_edges:
@@ -860,6 +909,13 @@ def merge_and_normalize(batches: list[dict[str, Any]]) -> tuple[dict[str, Any], 
         report.append("Tested-by linker:")
         report.append(f"  {tested_by_added:>4} × tested_by edges produced (path-convention supplement, production → test)")
         report.append(f"  {tested_by_tagged:>4} × production nodes tagged \"tested\"")
+
+    # Business signals section — cleaned optional product-facing hints.
+    if business_signal_nodes or business_signal_dropped:
+        report.append("")
+        report.append("Business signals:")
+        report.append(f"  {business_signal_nodes:>4} × nodes with businessSignals preserved")
+        report.append(f"  {business_signal_dropped:>4} × malformed/duplicate/over-cap businessSignals dropped")
 
     # Could not fix section — unknown patterns (grouped) + individual details
     unfixable_total = (

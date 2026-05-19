@@ -246,6 +246,37 @@ Skip trivial one-liners, type aliases, simple re-exports, and auto-generated boi
 
 For each function/class node, provide a `summary` and `tags` using the same guidelines as file nodes.
 
+### Business Signals
+
+When a file, class, function, method, endpoint, service, receiver, route, task, or resource clearly carries product-facing or business behavior, add a `businessSignals` array to that node.
+
+Signal schema:
+
+```json
+{"type": "entry|behavior|rule|display|data|integration", "text": "short product phrase"}
+```
+
+Rules:
+
+- `businessSignals` is optional. Omit it when the node has no clear product meaning.
+- Do not include anchors, file paths, line ranges, conditions, or long explanations inside a signal. The node itself provides location.
+- File node signals describe what business the file carries as a whole.
+- Class/function/method node signals describe the concrete business behavior at that symbol.
+- Each function/method node may have at most 1 signal.
+- Each class node may have at most 3 signals.
+- Each file node may have at most 8 signals.
+- `text` must be a short product phrase, not a sentence-length code explanation.
+- Do not emit signals for ViewBinding initialization, inheritance, dependency injection, logging, generic utilities, observer registration, or base framework boilerplate.
+
+Examples:
+
+```json
+{"type": "entry", "text": "开机广播接收入口"}
+{"type": "display", "text": "首页退出确认弹窗"}
+{"type": "data", "text": "播放记录后台同步"}
+{"type": "integration", "text": "投屏设备发现与连接"}
+```
+
 ### Step 3 -- Create Edges
 
 Using the script's structural data and file categories, create edges:
@@ -343,7 +374,10 @@ Produce a single, valid JSON block. Before writing, verify that all arrays and o
       "summary": "Main entry point that bootstraps the application and re-exports all public modules.",
       "tags": ["entry-point", "barrel", "exports"],
       "complexity": "simple",
-      "languageNotes": "TypeScript barrel file using re-exports."
+      "languageNotes": "TypeScript barrel file using re-exports.",
+      "businessSignals": [
+        {"type": "entry", "text": "public module entry point"}
+      ]
     },
     {
       "id": "config:tsconfig.json",
@@ -438,6 +472,7 @@ Produce a single, valid JSON block. Before writing, verify that all arrays and o
 
 **Optional fields:**
 - `languageNotes` (string) -- only when there is a genuinely notable pattern
+- `businessSignals` (array) -- optional product-facing signals for a GraphNode, each shaped as `{ "type": "entry|behavior|rule|display|data|integration", "text": "short product phrase" }`
 
 **Required fields for every edge:**
 - `source` (string) -- must reference an existing node `id` in your output or a known node from the project

@@ -870,5 +870,45 @@ class MergeIntegrationTests(unittest.TestCase):
         self.assertIn("tested", prod_node["tags"])
 
 
+class BusinessSignalMergeTests(unittest.TestCase):
+    def test_dedupes_and_caps_business_signals(self):
+        node = {
+            "id": "file:src/HomeActivity.kt",
+            "type": "file",
+            "name": "HomeActivity.kt",
+            "filePath": "src/HomeActivity.kt",
+            "summary": "Home entry.",
+            "tags": [],
+            "complexity": "simple",
+            "businessSignals": [
+                {"type": "entry", "text": "标准首页入口"},
+                {"type": "entry", "text": "标准首页入口"},
+                {"type": "display", "text": "首页退出确认弹窗"},
+                {"type": "bad", "text": "错误类型"},
+                {"type": "data", "text": ""},
+                {"type": "behavior", "text": "首页初始化"},
+                {"type": "rule", "text": "退出拦截策略"},
+                {"type": "integration", "text": "外部路由调起"},
+                {"type": "data", "text": "首页数据请求"},
+                {"type": "display", "text": "首页顶部导航展示"},
+                {"type": "behavior", "text": "首页推荐内容加载"},
+            ],
+        }
+
+        assembled, report = mbg.merge_and_normalize([{"nodes": [node], "edges": []}])
+        merged = assembled["nodes"][0]
+
+        self.assertEqual(len(merged["businessSignals"]), 8)
+        self.assertEqual(
+            merged["businessSignals"][0],
+            {"type": "entry", "text": "标准首页入口"},
+        )
+        self.assertEqual(
+            len({(s["type"], s["text"]) for s in merged["businessSignals"]}),
+            len(merged["businessSignals"]),
+        )
+        self.assertTrue(any("businessSignals" in line for line in report))
+
+
 if __name__ == "__main__":
     unittest.main()
