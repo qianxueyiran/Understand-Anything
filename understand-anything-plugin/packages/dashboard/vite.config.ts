@@ -81,25 +81,25 @@ function sanitiseProductEvidenceForResponse(
   evidence: ProductEvidence,
   projectRoot: string,
 ): ProductEvidence {
-  if (typeof evidence.filePath !== "string") {
-    return evidence;
+  const base = { ...evidence, tokens: [] };
+  if (typeof base.filePath !== "string") {
+    return base;
   }
 
-  const safeFilePath = getSafeProductEvidenceFilePath(evidence.filePath, projectRoot);
+  const safeFilePath = getSafeProductEvidenceFilePath(base.filePath, projectRoot);
   if (safeFilePath) {
     return {
-      ...evidence,
+      ...base,
       filePath: safeFilePath,
-      tokens: [],
     };
   }
 
-  if (evidence.nodeId) {
-    const { filePath: _filePath, ...rest } = evidence;
-    return { ...rest, tokens: [] };
+  if (base.nodeId) {
+    const { filePath: _filePath, ...rest } = base;
+    return rest;
   }
 
-  throw new Error(`Invalid product evidence filePath: ${evidence.filePath}`);
+  throw new Error(`Invalid product evidence filePath: ${base.filePath}`);
 }
 
 function getSafeProductEvidenceFilePath(
