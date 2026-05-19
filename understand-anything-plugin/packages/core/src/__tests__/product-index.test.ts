@@ -44,6 +44,8 @@ const sampleIndex: ProductIndex = {
       aliases: ["Cast", "DLNA"],
       summary: "把当前视频推送到可投屏设备播放。",
       status: "summarized",
+      sourceCandidateIds: [],
+      factIds: [],
       entryEvidenceIds: ["ev:cast-button"],
       evidenceIds: ["ev:cast-button", "ev:cast-allowed-field"],
       domainRefs: ["domain:playback"],
@@ -69,6 +71,7 @@ const sampleIndex: ProductIndex = {
       symbol: "PlayerActivity",
       lineRange: [12, 48],
       nodeId: "class:player/PlayerActivity.kt:PlayerActivity",
+      nodeIds: ["class:player/PlayerActivity.kt:PlayerActivity"],
       signalTypes: ["entry", "ui"],
       tokens: ["player", "cast", "投屏"],
       reason: "播放页投屏入口。",
@@ -81,6 +84,7 @@ const sampleIndex: ProductIndex = {
       symbol: "castAllowed",
       lineRange: [31, 31],
       nodeId: "class:player/model/PlaybackInfo.kt:PlaybackInfo",
+      nodeIds: ["class:player/model/PlaybackInfo.kt:PlaybackInfo"],
       signalTypes: ["data", "rule"],
       tokens: ["cast", "allowed", "投屏", "可用"],
       reason: "播放信息模型包含服务端下发的投屏可用性字段。",
@@ -182,6 +186,30 @@ describe("ProductIndex schema", () => {
     });
 
     expect(result.success).toBe(true);
+  });
+
+  it("applies defaults for grounded fields on raw product index input", () => {
+    const result = validateProductIndex({
+      ...sampleIndex,
+      topics: [
+        {
+          ...sampleIndex.topics[0],
+          sourceCandidateIds: undefined,
+          factIds: undefined,
+        },
+      ],
+      evidence: [
+        ...sampleIndex.evidence.map((evidence) => ({
+          ...evidence,
+          nodeIds: undefined,
+        })),
+      ],
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.data?.topics[0].sourceCandidateIds).toEqual([]);
+    expect(result.data?.topics[0].factIds).toEqual([]);
+    expect(result.data?.evidence[0].nodeIds).toEqual([]);
   });
 
   it("rejects confirmed fact without evidence ids", () => {
@@ -297,6 +325,7 @@ describe("searchProductIndex", () => {
           symbol: "serverExperiment",
           lineRange: [42, 42],
           nodeId: "class:player/model/PlaybackInfo.kt:PlaybackInfo",
+          nodeIds: ["class:player/model/PlaybackInfo.kt:PlaybackInfo"],
           signalTypes: ["data"],
           tokens: ["serverExperiment"],
           reason: "服务端实验开关。",

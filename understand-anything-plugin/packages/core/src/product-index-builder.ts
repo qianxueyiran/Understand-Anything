@@ -326,6 +326,8 @@ export function buildDeterministicProductIndex(
       aliases: seed.nameCandidates.slice(1, 6),
       summary: `${topicName} 相关产品入口，已索引 ${evidenceIds.length} 条代码证据。`,
       status: evidenceIds.length > 1 ? "indexed" : "seeded",
+      sourceCandidateIds: [],
+      factIds: [],
       entryEvidenceIds: uniqueStrings(entryEvidenceIds),
       evidenceIds: uniqueStrings(evidenceIds),
       domainRefs: collectDomainRefs(domainGraph, seed.nameCandidates),
@@ -700,6 +702,7 @@ function buildEvidenceFromNode(
     symbol: node.name,
     ...(node.lineRange ? { lineRange: node.lineRange } : {}),
     nodeId: node.id,
+    nodeIds: [node.id],
     signalTypes,
     tokens,
     reason: isEntry
