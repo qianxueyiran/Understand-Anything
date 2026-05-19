@@ -115,10 +115,20 @@ export {
 } from "./product-index.js";
 export {
   enumerateProductEntrySeeds,
+  buildProductBoundaryCandidates,
   buildProductSignals,
   buildDeterministicProductIndex,
+  buildTopicContextPacks,
+  normaliseProductTopics,
+  type NormalizedProductTopic,
+  type ProductBoundaryCandidate,
+  type ProductBoundaryCandidateOptions,
+  type ProductContextAnchor,
+  type ProductContextFile,
   type ProductEntrySeed,
   type ProductProfileOptions,
+  type TopicContextPack,
+  type TopicContextPackOptions,
 } from "./product-index-builder.js";
 // Non-code parsers
 export {

@@ -28,6 +28,63 @@ export interface ProductEntrySeed {
   score: number;
 }
 
+export interface ProductBoundaryCandidate {
+  id: string;
+  rootNodeId: string;
+  name: string;
+  entryKind: string;
+  filePath?: string;
+  businessSignals: NonNullable<GraphNode["businessSignals"]>;
+  neighborNodeIds: string[];
+  domainRefs: string[];
+}
+
+export interface NormalizedProductTopic {
+  id: string;
+  name: string;
+  summary: string;
+  kind: ProductTopicKind;
+  sourceCandidateIds: string[];
+  rootNodeIds: string[];
+  domainRefs: string[];
+}
+
+export interface ProductContextAnchor {
+  anchorId: string;
+  nodeId: string;
+  type: "entry" | "behavior" | "rule" | "display" | "data" | "integration";
+  text: string;
+  symbol?: string;
+  lineRange?: [number, number];
+  snippetSummary: string;
+}
+
+export interface ProductContextFile {
+  fileId: string;
+  filePath: string;
+  nodeSummaries: string[];
+  businessSignals: Array<{ type: string; text: string; nodeId: string }>;
+  structuralReasons: string[];
+  anchors: ProductContextAnchor[];
+}
+
+export interface TopicContextPack {
+  topic: NormalizedProductTopic;
+  roots: string[];
+  candidateFiles: ProductContextFile[];
+  overflowFiles: string[];
+}
+
+export interface ProductBoundaryCandidateOptions {
+  entryPatterns?: string[];
+  maxNeighborNodeIds?: number;
+}
+
+export interface TopicContextPackOptions {
+  maxFilesPerTopic?: number;
+  maxAnchorsPerFile?: number;
+}
+
 interface WeightedNeighbor {
   nodeId: string;
   type: GraphEdge["type"];
@@ -170,8 +227,12 @@ const DEFAULT_MAX_NODES_PER_TOPIC = 160;
 const DEFAULT_MAX_FRONTIER_PER_DEPTH = 32;
 const DEFAULT_MAX_EVIDENCE_PER_TOPIC = 50;
 const DEFAULT_HUB_DEGREE_THRESHOLD = 80;
+const DEFAULT_MAX_BOUNDARY_NEIGHBORS = 16;
+const DEFAULT_MAX_FILES_PER_TOPIC = 30;
+const DEFAULT_MAX_ANCHORS_PER_FILE = 5;
 const STRONG_HUB_PRODUCT_SCORE = 0.7;
 const HUB_SCORE_PENALTY = 0.25;
+const BOUNDARY_SIGNAL_TYPES = new Set(["entry", "display", "rule", "data", "integration"]);
 const COMMON_DOMAIN_TOKENS = new Set([
   "activity",
   "fragment",
@@ -259,6 +320,119 @@ export function buildProductSignals(
   }
 
   return signals;
+}
+
+export function buildProductBoundaryCandidates(
+  graph: KnowledgeGraph,
+  domainGraph?: KnowledgeGraph,
+  options: ProductBoundaryCandidateOptions = {},
+): ProductBoundaryCandidate[] {
+  const patterns = compileEntryPatterns(options.entryPatterns);
+  const adjacency = buildAdjacency(graph.edges);
+  const maxNeighbors = options.maxNeighborNodeIds ?? DEFAULT_MAX_BOUNDARY_NEIGHBORS;
+
+  return graph.nodes
+    .map((node) => {
+      const businessSignals = node.businessSignals ?? [];
+      const boundarySignals = businessSignals.filter((signal) => BOUNDARY_SIGNAL_TYPES.has(signal.type));
+      const entryCandidate = isEntryCandidate(node, patterns);
+      if (!entryCandidate && boundarySignals.length === 0) {
+        return undefined;
+      }
+
+      const entryKind = entryCandidate ? inferEntryKind(node) : boundarySignals[0]?.type ?? "entry";
+      if (businessSignals.length === 0 && entryKind === "entry") {
+        return undefined;
+      }
+
+      const domainCandidates = [
+        node.name,
+        node.filePath,
+        ...businessSignals.map((signal) => signal.text),
+      ].filter(isString);
+
+      return {
+        id: `candidate:${node.id}`,
+        rootNodeId: node.id,
+        name: node.name,
+        entryKind,
+        ...(node.filePath ? { filePath: node.filePath } : {}),
+        businessSignals,
+        neighborNodeIds: uniqueStrings(
+          (adjacency.get(node.id) ?? [])
+            .sort((a, b) => b.weight - a.weight || a.nodeId.localeCompare(b.nodeId))
+            .map((neighbor) => neighbor.nodeId),
+        ).slice(0, maxNeighbors),
+        domainRefs: collectDomainRefs(domainGraph, domainCandidates),
+      } satisfies ProductBoundaryCandidate;
+    })
+    .filter((candidate): candidate is ProductBoundaryCandidate => candidate !== undefined)
+    .sort(
+      (a, b) =>
+        boundaryCandidateRank(b) - boundaryCandidateRank(a) ||
+        a.rootNodeId.localeCompare(b.rootNodeId),
+    );
+}
+
+export function normaliseProductTopics(
+  candidates: ProductBoundaryCandidate[],
+): NormalizedProductTopic[] {
+  const seenIds = new Set<string>();
+
+  return candidates.map((candidate, index) => {
+    const name = candidate.businessSignals[0]?.text || candidate.name || candidate.rootNodeId;
+    const baseSlug = slugifyTopicId(name) || slugifyTopicId(candidate.rootNodeId) || `candidate-${index + 1}`;
+    const id = uniqueTopicId(`topic:${baseSlug}`, seenIds);
+
+    return {
+      id,
+      name,
+      summary: `${name} 相关产品主题。`,
+      kind: topicKindForEntry(candidate.entryKind),
+      sourceCandidateIds: [candidate.id],
+      rootNodeIds: [candidate.rootNodeId],
+      domainRefs: uniqueStrings(candidate.domainRefs),
+    };
+  });
+}
+
+export function buildTopicContextPacks(
+  graph: KnowledgeGraph,
+  topics: NormalizedProductTopic[],
+  options: TopicContextPackOptions = {},
+): TopicContextPack[] {
+  const maxFiles = options.maxFilesPerTopic ?? DEFAULT_MAX_FILES_PER_TOPIC;
+  const maxAnchors = options.maxAnchorsPerFile ?? DEFAULT_MAX_ANCHORS_PER_FILE;
+  const nodeById = new Map(graph.nodes.map((node) => [node.id, node]));
+  const adjacency = buildAdjacency(graph.edges);
+
+  return topics.map((topic) => {
+    const recalled = recallTopicNodes(topic.rootNodeIds, nodeById, adjacency);
+    const fileGroups = new Map<string, Array<{ node: GraphNode; reasons: Set<string> }>>();
+
+    for (const [nodeId, reasons] of recalled) {
+      const node = nodeById.get(nodeId);
+      if (!node?.filePath || isCommonInfrastructureNode(node)) {
+        continue;
+      }
+
+      const group = fileGroups.get(node.filePath) ?? [];
+      group.push({ node, reasons });
+      fileGroups.set(node.filePath, group);
+    }
+
+    const files = Array.from(fileGroups.entries())
+      .map(([filePath, items]) => buildProductContextFile(filePath, items, maxAnchors))
+      .filter((file) => file.businessSignals.length > 0 || file.anchors.length > 0)
+      .sort((a, b) => contextFileRank(b) - contextFileRank(a) || a.filePath.localeCompare(b.filePath));
+
+    return {
+      topic,
+      roots: topic.rootNodeIds.filter((rootNodeId) => nodeById.has(rootNodeId)),
+      candidateFiles: files.slice(0, maxFiles),
+      overflowFiles: files.slice(maxFiles).map((file) => file.filePath),
+    };
+  });
 }
 
 export function buildDeterministicProductIndex(
@@ -387,6 +561,149 @@ function compileEntryPatterns(patterns?: string[]): RegExp[] {
   }
 
   return patterns.map((pattern) => globPatternToRegex(pattern));
+}
+
+function boundaryCandidateRank(candidate: ProductBoundaryCandidate): number {
+  const signalScore = candidate.businessSignals.reduce(
+    (score, signal) => score + (BOUNDARY_SIGNAL_TYPES.has(signal.type) ? 2 : 1),
+    0,
+  );
+  const entryScore = candidate.entryKind === "entry" ? 0 : 1;
+  return signalScore + entryScore;
+}
+
+function uniqueTopicId(baseId: string, seenIds: Set<string>): string {
+  let id = baseId;
+  let suffix = 2;
+  while (seenIds.has(id)) {
+    id = `${baseId}-${suffix}`;
+    suffix += 1;
+  }
+  seenIds.add(id);
+  return id;
+}
+
+function slugifyTopicId(value: string): string {
+  return value
+    .normalize("NFKC")
+    .toLowerCase()
+    .replace(/[^a-z0-9\u4e00-\u9fa5]+/gu, "-")
+    .replace(/^-+|-+$/gu, "")
+    .slice(0, 80);
+}
+
+function recallTopicNodes(
+  rootNodeIds: string[],
+  nodeById: Map<string, GraphNode>,
+  adjacency: Map<string, WeightedNeighbor[]>,
+): Map<string, Set<string>> {
+  const recalled = new Map<string, Set<string>>();
+
+  for (const rootNodeId of rootNodeIds) {
+    if (!nodeById.has(rootNodeId)) {
+      continue;
+    }
+
+    addRecallReason(recalled, rootNodeId, "root");
+    const firstHop = adjacency.get(rootNodeId) ?? [];
+    for (const neighbor of firstHop) {
+      addRecallReason(recalled, neighbor.nodeId, "direct-neighbor");
+
+      for (const secondHop of adjacency.get(neighbor.nodeId) ?? []) {
+        const secondHopNode = nodeById.get(secondHop.nodeId);
+        if (secondHopNode?.businessSignals && secondHopNode.businessSignals.length > 0) {
+          addRecallReason(recalled, secondHop.nodeId, "business-signal-hop");
+        }
+      }
+    }
+  }
+
+  return recalled;
+}
+
+function addRecallReason(recalled: Map<string, Set<string>>, nodeId: string, reason: string): void {
+  const reasons = recalled.get(nodeId) ?? new Set<string>();
+  reasons.add(reason);
+  recalled.set(nodeId, reasons);
+}
+
+function isCommonInfrastructureNode(node: GraphNode): boolean {
+  const filePath = node.filePath?.toLowerCase() ?? "";
+  if (!filePath.includes("/common/") || hasBusinessSignals(node)) {
+    return false;
+  }
+
+  return /\b(base|common|util|logger)\b/u.test(
+    `${node.name} ${node.summary} ${node.tags.join(" ")}`.toLowerCase(),
+  );
+}
+
+function buildProductContextFile(
+  filePath: string,
+  items: Array<{ node: GraphNode; reasons: Set<string> }>,
+  maxAnchors: number,
+): ProductContextFile {
+  const sortedItems = items.sort((a, b) => compareContextNodes(a.node, b.node));
+  const businessSignals = sortedItems.flatMap(({ node }) =>
+    (node.businessSignals ?? []).map((signal) => ({
+      type: signal.type,
+      text: signal.text,
+      nodeId: node.id,
+    })),
+  );
+  const anchors = sortedItems
+    .filter(({ node }) => hasBusinessSignals(node) && node.type !== "file")
+    .sort((a, b) => compareAnchorNodes(a.node, b.node))
+    .flatMap(({ node }) => buildContextAnchors(node))
+    .slice(0, maxAnchors);
+
+  return {
+    fileId: `file:${filePath}`,
+    filePath,
+    nodeSummaries: uniqueStrings(
+      sortedItems
+        .map(({ node }) => node.summary || node.name)
+        .filter(isString),
+    ).slice(0, 12),
+    businessSignals,
+    structuralReasons: uniqueStrings(sortedItems.flatMap(({ reasons }) => Array.from(reasons))).sort(),
+    anchors,
+  };
+}
+
+function buildContextAnchors(node: GraphNode): ProductContextAnchor[] {
+  return (node.businessSignals ?? []).map((signal) => ({
+    anchorId: `anchor:${node.id}`,
+    nodeId: node.id,
+    type: signal.type,
+    text: signal.text,
+    symbol: node.name,
+    ...(node.lineRange ? { lineRange: node.lineRange } : {}),
+    snippetSummary: node.summary || signal.text,
+  }));
+}
+
+function compareContextNodes(a: GraphNode, b: GraphNode): number {
+  const lineA = a.lineRange?.[0] ?? Number.MAX_SAFE_INTEGER;
+  const lineB = b.lineRange?.[0] ?? Number.MAX_SAFE_INTEGER;
+  return lineA - lineB || a.id.localeCompare(b.id);
+}
+
+function compareAnchorNodes(a: GraphNode, b: GraphNode): number {
+  const symbolScoreA = a.lineRange ? 1 : 0;
+  const symbolScoreB = b.lineRange ? 1 : 0;
+  return symbolScoreB - symbolScoreA || compareContextNodes(a, b);
+}
+
+function contextFileRank(file: ProductContextFile): number {
+  const rootScore = file.structuralReasons.includes("root") ? 4 : 0;
+  const anchorScore = Math.min(file.anchors.length, 4);
+  const signalScore = Math.min(file.businessSignals.length, 4) * 0.5;
+  return rootScore + anchorScore + signalScore;
+}
+
+function hasBusinessSignals(node: GraphNode): boolean {
+  return (node.businessSignals?.length ?? 0) > 0;
 }
 
 function globPatternToRegex(pattern: string): RegExp {
