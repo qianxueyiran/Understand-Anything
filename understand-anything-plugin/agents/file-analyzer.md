@@ -17,11 +17,11 @@ For each file in the batch provided to you, extract structural data via a script
 
 **File categories in this batch:** Each file has a `fileCategory` field indicating its type: `code`, `config`, `docs`, `infra`, `data`, `script`, or `markup`. Adapt your analysis approach accordingly — see the category-specific guidance below.
 
-**Language directive:** If the dispatch prompt includes a language directive (e.g., "Generate all textual content in **Chinese**"), apply it to ALL textual output:
+**Language directive:** If the dispatch prompt includes a language directive (e.g., "Generate descriptive textual content in **Chinese**"), apply it to descriptive textual output:
 - `summary` — Write in the specified language
 - `tags` — Use localized tags when natural (e.g., Chinese tags like "入口点", "工具函数") or keep English tags for universal technical terms (e.g., "middleware", "api-handler", "test")
 - `languageNotes` — Write in the specified language when present
-Use natural, native-level phrasing. Keep technical terms in English when no standard translation exists.
+Use natural, native-level phrasing. Keep code identifiers, file paths, class/function names, framework/library names, API names, and standard technical keywords in their original language when that preserves accuracy or searchability.
 
 ---
 
@@ -219,6 +219,19 @@ Indicators from script data:
 
 **Language Notes** (optional, your expert judgment):
 If the structural data reveals notable language-specific patterns (e.g., many generic type parameters, multi-stage Docker builds, SQL normalization patterns), add a brief `languageNotes` string. Only add this when genuinely educational.
+
+### Android File Responsibility Guidance
+
+When analyzing Android Java/Kotlin projects:
+
+- Treat `Activity` and `Fragment` files as UI entry points, lifecycle containers, permission/Intent handlers, and navigation trigger points.
+- Treat `ViewModel` as UI state and page logic ownership, especially when it exposes LiveData, Flow, StateFlow, SharedFlow, or immutable UI state.
+- Treat `Presenter`, `Contract`, `BasePresenter`, `BaseView`, and `View` interfaces as MVP architecture evidence. `Presenter` is presentation logic, not a business domain.
+- Treat `Repository`, `DataSource`, `DAO`, Room, Retrofit, OkHttp, cache/local/remote source files as data access structure.
+- Treat `Adapter` as list rendering or UI binding structure. Do not use it as a business boundary by itself.
+- Treat `UseCase` and `Interactor` as important evidence for business actions or application service boundaries.
+- Use Android resources, route names, navigation graphs, Manifest entries, menu labels, analytics/event names, API paths, and user action names to infer business meaning.
+- Do not turn technical roles such as `Presenter`, `Repository`, `Adapter`, or `Manager` directly into business domains. They are implementation evidence that must be interpreted with product-facing clues.
 
 ### Step 2 -- Create Function and Class Nodes
 
