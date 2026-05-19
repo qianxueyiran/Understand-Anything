@@ -365,6 +365,20 @@ const KnowledgeMetaSchema = z.object({
   content: z.string().optional(),
 }).passthrough();
 
+const BusinessSignalTypeSchema = z.enum([
+  "entry",
+  "behavior",
+  "rule",
+  "display",
+  "data",
+  "integration",
+]);
+
+const BusinessSignalSchema = z.object({
+  type: BusinessSignalTypeSchema,
+  text: z.string().trim().min(1).max(80),
+});
+
 export const GraphNodeSchema = z.object({
   id: z.string(),
   type: z.enum([
@@ -383,6 +397,7 @@ export const GraphNodeSchema = z.object({
   languageNotes: z.string().optional(),
   domainMeta: DomainMetaSchema.optional(),
   knowledgeMeta: KnowledgeMetaSchema.optional(),
+  businessSignals: z.array(BusinessSignalSchema).optional(),
 }).passthrough();
 
 export const GraphEdgeSchema = z.object({
@@ -457,6 +472,37 @@ function buildErrors(issues: GraphIssue[], fatal?: string): string[] | undefined
   const messages = issues.map((issue) => issue.message);
   if (fatal && !messages.includes(fatal)) messages.unshift(fatal);
   return messages.length > 0 ? messages : undefined;
+}
+
+function sanitiseBusinessSignals(value: unknown, issues: GraphIssue[], nodeId: string): unknown {
+  if (value === undefined) return undefined;
+  if (!Array.isArray(value)) {
+    issues.push({
+      level: "auto-corrected",
+      category: "invalid-business-signal",
+      message: `node "${nodeId}": businessSignals must be an array — removed`,
+      path: "businessSignals",
+    });
+    return undefined;
+  }
+
+  const valid: Array<z.infer<typeof BusinessSignalSchema>> = [];
+  for (let i = 0; i < value.length; i++) {
+    const result = BusinessSignalSchema.safeParse(value[i]);
+    if (result.success) {
+      valid.push(result.data);
+      continue;
+    }
+
+    issues.push({
+      level: "auto-corrected",
+      category: "invalid-business-signal",
+      message: `node "${nodeId}": businessSignals[${i}] is malformed — removed`,
+      path: `businessSignals[${i}]`,
+    });
+  }
+
+  return valid.length > 0 ? valid : undefined;
 }
 
 export function normalizeGraph(data: unknown): unknown {
@@ -544,12 +590,27 @@ export function validateGraph(data: unknown): ValidationResult {
   const validNodes: z.infer<typeof GraphNodeSchema>[] = [];
   if (Array.isArray(fixed.nodes)) {
     for (let i = 0; i < fixed.nodes.length; i++) {
-      const node = fixed.nodes[i] as Record<string, unknown>;
+      const node =
+        typeof fixed.nodes[i] === "object" && fixed.nodes[i] !== null
+          ? { ...(fixed.nodes[i] as Record<string, unknown>) }
+          : fixed.nodes[i];
+      if (typeof node === "object" && node !== null && "businessSignals" in node) {
+        const nodeId = typeof node.id === "string" ? node.id : `nodes[${i}]`;
+        const businessSignals = sanitiseBusinessSignals(node.businessSignals, issues, nodeId);
+        if (businessSignals === undefined) {
+          delete node.businessSignals;
+        } else {
+          node.businessSignals = businessSignals;
+        }
+      }
       const result = GraphNodeSchema.safeParse(node);
       if (result.success) {
         validNodes.push(result.data);
       } else {
-        const name = node?.name || node?.id || `index ${i}`;
+        const name =
+          typeof node === "object" && node !== null
+            ? node.name || node.id || `index ${i}`
+            : `index ${i}`;
         issues.push({
           level: "dropped",
           category: "invalid-node",
