@@ -194,6 +194,54 @@ describe("product index chat context", () => {
     );
   });
 
+  it("includes fact and topic-level evidence when query matches only the topic", () => {
+    const mixedEvidenceIndex: ProductIndex = {
+      ...productIndex,
+      topics: [
+        {
+          ...productIndex.topics[0],
+          entryEvidenceIds: [],
+          evidenceIds: ["ev:cast-button"],
+        },
+      ],
+      facts: [
+        {
+          ...productIndex.facts[0],
+          evidenceIds: ["ev:player-entry"],
+        },
+      ],
+      evidence: [
+        productIndex.evidence[0],
+        {
+          ...productIndex.evidence[0],
+          id: "ev:cast-button",
+          role: "related",
+          filePath: "player/CastButton.kt",
+          symbol: "renderCastButton",
+          lineRange: [20, 42],
+          nodeId: "function:player/CastButton.kt:renderCastButton",
+          nodeIds: ["function:player/CastButton.kt:renderCastButton"],
+          signalTypes: ["ui"],
+          tokens: ["cast-button"],
+          reason: "投屏按钮渲染。",
+        },
+      ],
+    };
+
+    const ctx = buildProductIndexChatContext({
+      graph,
+      productIndex: mixedEvidenceIndex,
+      query: "投屏",
+    });
+
+    expect(ctx.codeEvidenceNodes.map((node) => node.id)).toEqual(
+      expect.arrayContaining([
+        "class:player/PlayerActivity.kt:PlayerActivity",
+        "function:player/CastButton.kt:renderCastButton",
+      ]),
+    );
+  });
+
   it("formats product topics, facts, and evidence locations for prompt", () => {
     const ctx = buildProductIndexChatContext({
       graph,

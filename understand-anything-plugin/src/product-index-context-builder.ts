@@ -65,13 +65,8 @@ export function buildProductIndexChatContext(
     for (const evidenceId of result.topic.entryEvidenceIds) {
       evidenceIds.add(evidenceId);
     }
-  }
-
-  if (evidenceIds.size === 0) {
-    for (const result of productResults) {
-      for (const evidenceId of result.topic.evidenceIds) {
-        evidenceIds.add(evidenceId);
-      }
+    for (const evidenceId of result.topic.evidenceIds) {
+      evidenceIds.add(evidenceId);
     }
   }
 

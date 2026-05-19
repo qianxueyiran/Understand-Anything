@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import type {
   ProductEvidence,
+  ProductFact,
   ProductTopic,
 } from "@understand-anything/core/product-index";
 import type { KnowledgeGraph } from "@understand-anything/core/types";
@@ -122,14 +123,19 @@ export default function ProductIndexPanel() {
       ) : (
         <div className="space-y-2.5">
           {topics.map((topic) => {
-            const topicEvidence = Array.from(
-              new Set([...topic.entryEvidenceIds, ...topic.evidenceIds]),
-            )
-              .map((id) => evidenceById.get(id))
-              .filter((item): item is ProductEvidence => Boolean(item));
             const facts = (topic.factIds ?? [])
               .map((id) => factsById.get(id))
-              .filter(Boolean);
+              .filter((fact): fact is ProductFact => Boolean(fact));
+            const topicEvidenceIds = Array.from(
+              new Set([
+                ...facts.flatMap((fact) => fact.evidenceIds),
+                ...topic.entryEvidenceIds,
+                ...topic.evidenceIds,
+              ]),
+            );
+            const topicEvidence = topicEvidenceIds
+              .map((id) => evidenceById.get(id))
+              .filter((item): item is ProductEvidence => Boolean(item));
             const evidenceTarget = findEvidenceTarget(topicEvidence, graph);
             const extraAliasCount = Math.max(0, topic.aliases.length - ALIAS_LIMIT);
 
@@ -171,9 +177,9 @@ export default function ProductIndexPanel() {
 
                 <div className="flex items-center justify-between gap-3 text-[11px]">
                   <div className="min-w-0">
-                    <div className="font-medium text-text-secondary">Fact Evidence</div>
+                    <div className="font-medium text-text-secondary">Evidence Refs</div>
                     <div className="font-mono text-text-muted">
-                      {topic.factIds?.length ?? facts.length} facts · {topic.evidenceIds.length}{" "}
+                      {facts.length} facts · {topicEvidenceIds.length}{" "}
                       evidence refs
                     </div>
                   </div>
