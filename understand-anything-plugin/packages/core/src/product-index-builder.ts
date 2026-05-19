@@ -675,8 +675,8 @@ function buildProductContextFile(
 }
 
 function buildContextAnchors(node: GraphNode): ProductContextAnchor[] {
-  return (node.businessSignals ?? []).map((signal) => ({
-    anchorId: `anchor:${node.id}`,
+  return (node.businessSignals ?? []).map((signal, index) => ({
+    anchorId: `anchor:${node.id}:${index}`,
     nodeId: node.id,
     type: signal.type,
     text: signal.text,

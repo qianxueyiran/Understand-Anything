@@ -115,12 +115,48 @@ describe("grounded product index builder", () => {
     expect(packs).toHaveLength(1);
     expect(packs[0].candidateFiles.map((file) => file.filePath)).toContain("app/BootBroadcastReceiver.java");
     expect(packs[0].candidateFiles.flatMap((file) => file.anchors).map((anchor) => anchor.anchorId)).toContain(
-      "anchor:function:BootBroadcastReceiver.java:onReceive",
+      "anchor:function:BootBroadcastReceiver.java:onReceive:0",
     );
     expect(packs[0].candidateFiles.map((file) => file.filePath)).toContain("app/HomeCoordinator.java");
     expect(packs[0].candidateFiles.find((file) => file.filePath === "app/HomeCoordinator.java")?.anchors).toEqual(
       [],
     );
     expect(packs[0].candidateFiles.map((file) => file.filePath)).not.toContain("common/BaseReceiver.java");
+  });
+
+  it("generates stable unique anchor ids for multiple signals on one node", () => {
+    const multiSignalNode = node({
+      id: "function:PlaybackRules.java:applyRules",
+      type: "function",
+      name: "applyRules",
+      filePath: "app/PlaybackRules.java",
+      lineRange: [12, 28],
+      businessSignals: [
+        { type: "rule", text: "校验会员播放权限" },
+        { type: "data", text: "读取播放配置" },
+      ],
+    });
+    const topic = normaliseProductTopics([
+      {
+        id: "candidate:PlaybackRules",
+        rootNodeId: multiSignalNode.id,
+        name: "PlaybackRules",
+        entryKind: "handler",
+        filePath: multiSignalNode.filePath,
+        businessSignals: multiSignalNode.businessSignals ?? [],
+        neighborNodeIds: [],
+        domainRefs: [],
+      },
+    ])[0];
+
+    const packs = buildTopicContextPacks(graph([multiSignalNode]), [topic]);
+    const anchors = packs[0].candidateFiles.flatMap((file) => file.anchors);
+
+    expect(anchors.map((anchor) => anchor.anchorId)).toEqual([
+      "anchor:function:PlaybackRules.java:applyRules:0",
+      "anchor:function:PlaybackRules.java:applyRules:1",
+    ]);
+    expect(new Set(anchors.map((anchor) => anchor.anchorId)).size).toBe(2);
+    expect(anchors.map((anchor) => anchor.text)).toEqual(["校验会员播放权限", "读取播放配置"]);
   });
 });
