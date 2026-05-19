@@ -79,14 +79,13 @@ file-analyzer 读源码
 
 ### 定位
 
-`businessSignals` 不是产品事实，不是最终证据，也不是完整业务规则。它只是挂在 knowledge-graph node 上的轻量业务线索，用于帮助 `/understand-product` 找到产品边界、构建 topic 上下文和定位 anchors。
+`businessSignals` 不是产品事实，不是最终证据，也不是完整业务规则。它只是挂在 knowledge-graph node 上的轻量业务线索，用于帮助 `/understand-product` 找到产品边界、构建 topic 上下文，并通过所属 graph node 反查定位信息。
 
-它只回答三个问题：
+它只回答两个问题：
 
 ```text
 这是什么产品线索？
 它属于哪类？
-它在哪里？
 ```
 
 ### 生成位置
@@ -107,10 +106,6 @@ file-analyzer 读源码
 interface BusinessSignal {
   type: "entry" | "behavior" | "rule" | "display" | "data" | "integration";
   text: string;
-  anchor?: {
-    symbol?: string;
-    lineRange?: [number, number];
-  };
 }
 ```
 
@@ -119,13 +114,17 @@ interface BusinessSignal {
 ```json
 {
   "type": "display",
-  "text": "首页退出确认弹窗",
-  "anchor": {
-    "symbol": "showExitDialog",
-    "lineRange": [120, 165]
-  }
+  "text": "首页退出确认弹窗"
 }
 ```
+
+`BusinessSignal` 不包含 `anchor` 字段。signal 挂在哪个 graph node 上，哪个 node 就是它的定位锚点：
+
+- 挂在 file node 上：定位到该文件的 `filePath`。
+- 挂在 class node 上：定位到该类的 `filePath`、`name` 和可用的 `lineRange`。
+- 挂在 function/method node 上：定位到该函数的 `filePath`、`name` 和 `lineRange`。
+
+这样可以避免 signal 与 graph node 重复存储 `filePath`、`lineRange`，也避免两处定位信息不一致。
 
 类型含义：
 
@@ -161,13 +160,49 @@ interface BusinessSignal {
 - 不输出条件、完整规则、完整流程。
 - 不输出“初始化 ViewBinding”“继承 BaseActivity”“注册 observer”这类代码结构描述。
 
+file node 和 symbol node 的 signal 含义不同：
+
+- file node 的 `businessSignals` 描述这个文件整体承载什么产品业务或能力。
+- class/function/method node 的 `businessSignals` 描述具体符号承载的产品行为、规则、展示、数据或集成点。
+
+示例：
+
+```json
+{
+  "id": "file:app/a_home/src/main/java/com/gala/video/app/epg/androidtv/BootBroadcastReceiver.java",
+  "type": "file",
+  "businessSignals": [
+    {
+      "type": "entry",
+      "text": "开机广播接收入口"
+    }
+  ]
+}
+```
+
+```json
+{
+  "id": "function:app/a_home/src/main/java/com/gala/video/app/epg/androidtv/BootBroadcastReceiver.java:onReceive",
+  "type": "function",
+  "lineRange": [18, 21],
+  "businessSignals": [
+    {
+      "type": "behavior",
+      "text": "接收开机广播并启动后续处理"
+    }
+  ]
+}
+```
+
+file 级 signal 主要用于主题发现和文件召回；symbol 级 signal 优先用于 Fact 和 Evidence。只有当某个 Fact 只能由文件整体职责支撑、且没有更细 symbol signal 时，才使用 file 级 evidence。
+
 ### 代码做什么
 
 代码负责：
 
-- 校验 `type`、`text`、`anchor`。
-- 丢弃空文本、非法 lineRange、未知 type。
-- 合并同一 node 上重复的 `type + text + anchor`。
+- 校验 `type`、`text`。
+- 丢弃空文本、未知 type。
+- 合并同一 node 上重复的 `type + text`。
 - 在 batch merge 时保留 signals。
 - 在 node 合并时合并 signals。
 - 超过上限时裁剪。
