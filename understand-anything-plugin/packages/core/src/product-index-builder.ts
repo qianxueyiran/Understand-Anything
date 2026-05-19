@@ -423,7 +423,6 @@ export function buildTopicContextPacks(
 
     const files = Array.from(fileGroups.entries())
       .map(([filePath, items]) => buildProductContextFile(filePath, items, maxAnchors))
-      .filter((file) => file.businessSignals.length > 0 || file.anchors.length > 0)
       .sort((a, b) => contextFileRank(b) - contextFileRank(a) || a.filePath.localeCompare(b.filePath));
 
     return {
@@ -629,13 +628,17 @@ function addRecallReason(recalled: Map<string, Set<string>>, nodeId: string, rea
 
 function isCommonInfrastructureNode(node: GraphNode): boolean {
   const filePath = node.filePath?.toLowerCase() ?? "";
-  if (!filePath.includes("/common/") || hasBusinessSignals(node)) {
+  if (!/(^|\/)common(\/|$)/u.test(filePath) || hasBusinessSignals(node)) {
     return false;
   }
 
-  return /\b(base|common|util|logger)\b/u.test(
-    `${node.name} ${node.summary} ${node.tags.join(" ")}`.toLowerCase(),
+  const tokens = uniqueStrings(
+    [node.name, node.summary, ...node.tags].flatMap((value) => [
+      ...extractTokens(value),
+      ...splitCamelCaseTokens(value),
+    ]).map((token) => token.toLowerCase()),
   );
+  return tokens.some((token) => ["base", "common", "util", "logger"].includes(token));
 }
 
 function buildProductContextFile(

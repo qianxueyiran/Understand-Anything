@@ -66,6 +66,12 @@ describe("grounded product index builder", () => {
     lineRange: [31, 65],
     businessSignals: [{ type: "data", text: "开机后首页数据请求" }],
   });
+  const homeCoordinator = node({
+    id: "class:HomeCoordinator.java:HomeCoordinator",
+    name: "HomeCoordinator",
+    filePath: "app/HomeCoordinator.java",
+    summary: "Coordinates home boot flow.",
+  });
   const base = node({
     id: "class:BaseReceiver.java:BaseReceiver",
     name: "BaseReceiver",
@@ -83,9 +89,10 @@ describe("grounded product index builder", () => {
 
   it("builds compact topic context packs and keeps symbol anchors", () => {
     const kg = graph(
-      [receiver, onReceive, homeTask, base],
+      [receiver, onReceive, homeTask, homeCoordinator, base],
       [
         edge({ source: receiver.id, target: onReceive.id, type: "contains" }),
+        edge({ source: receiver.id, target: homeCoordinator.id, type: "calls" }),
         edge({ source: onReceive.id, target: homeTask.id, type: "calls" }),
         edge({ source: receiver.id, target: base.id, type: "inherits", weight: 0.2 }),
       ],
@@ -109,6 +116,10 @@ describe("grounded product index builder", () => {
     expect(packs[0].candidateFiles.map((file) => file.filePath)).toContain("app/BootBroadcastReceiver.java");
     expect(packs[0].candidateFiles.flatMap((file) => file.anchors).map((anchor) => anchor.anchorId)).toContain(
       "anchor:function:BootBroadcastReceiver.java:onReceive",
+    );
+    expect(packs[0].candidateFiles.map((file) => file.filePath)).toContain("app/HomeCoordinator.java");
+    expect(packs[0].candidateFiles.find((file) => file.filePath === "app/HomeCoordinator.java")?.anchors).toEqual(
+      [],
     );
     expect(packs[0].candidateFiles.map((file) => file.filePath)).not.toContain("common/BaseReceiver.java");
   });
