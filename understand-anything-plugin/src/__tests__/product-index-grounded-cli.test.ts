@@ -45,6 +45,15 @@ function writeGraph(projectRoot: string): void {
   );
 }
 
+function expectNoFinalOutputs(projectRoot: string): void {
+  expect(
+    existsSync(join(projectRoot, ".understand-anything/product-signals.jsonl")),
+  ).toBe(false);
+  expect(
+    existsSync(join(projectRoot, ".understand-anything/product-index.json")),
+  ).toBe(false);
+}
+
 describe("grounded product index cli", () => {
   it("prepares context packs without writing final facts", async () => {
     const projectRoot = mkdtempSync(join(tmpdir(), "ua-product-prepare-"));
@@ -135,5 +144,44 @@ describe("grounded product index cli", () => {
         join(projectRoot, ".understand-anything/product-index.json"),
       ),
     ).toBe(true);
+  });
+
+  it("rejects conflicting modes before writing outputs", async () => {
+    for (const args of [
+      ["--prepare", "--finalize"],
+      ["--fast", "--prepare"],
+      ["--fast", "--finalize"],
+    ]) {
+      const projectRoot = mkdtempSync(join(tmpdir(), "ua-product-conflict-"));
+      writeGraph(projectRoot);
+
+      await expect(runProductIndexCli([projectRoot, ...args])).rejects.toThrow(
+        /Choose only one of --prepare, --finalize, or --fast\./,
+      );
+      expectNoFinalOutputs(projectRoot);
+    }
+  });
+
+  it("reports a clear error when finalizing without context packs", async () => {
+    const projectRoot = mkdtempSync(join(tmpdir(), "ua-product-no-packs-"));
+    writeGraph(projectRoot);
+
+    await expect(
+      runProductIndexCli([projectRoot, "--finalize", "--platform", "android"]),
+    ).rejects.toThrow(
+      /product-context-packs\.json not found\. 请先运行 \/understand-product --prepare。/,
+    );
+  });
+
+  it("reports a clear error when finalizing without extraction output", async () => {
+    const projectRoot = mkdtempSync(join(tmpdir(), "ua-product-no-extractions-"));
+    writeGraph(projectRoot);
+    await runProductIndexCli([projectRoot, "--prepare", "--platform", "android"]);
+
+    await expect(
+      runProductIndexCli([projectRoot, "--finalize", "--platform", "android"]),
+    ).rejects.toThrow(
+      /product-index-extractions\.json not found\. LLM analyzer did not write extraction output\./,
+    );
   });
 });

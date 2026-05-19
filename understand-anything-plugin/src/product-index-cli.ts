@@ -83,10 +83,6 @@ export async function runProductIndexCli(
   );
   writeProductSignalsSidecar(signalsPath, signals);
 
-  if (options.prepare && options.finalize) {
-    throw new Error("--prepare and --finalize cannot be used together.");
-  }
-
   const businessSignalCount = countBusinessSignals(graph);
   const intermediateDir = join(
     options.projectRoot,
@@ -127,9 +123,13 @@ export async function runProductIndexCli(
   }
 
   if (options.finalize) {
-    const contextPacks = readJson<TopicContextPack[]>(contextPacksPath);
-    const extractions = readJson<ProductTopicExtraction[]>(
+    const contextPacks = readJsonFile<TopicContextPack[]>(
+      contextPacksPath,
+      "product-context-packs.json not found. 请先运行 /understand-product --prepare。",
+    );
+    const extractions = readJsonFile<ProductTopicExtraction[]>(
       join(intermediateDir, "product-index-extractions.json"),
+      "product-index-extractions.json not found. LLM analyzer did not write extraction output.",
     );
     const topics = contextPacks.map((pack) => pack.topic);
     const index = finalizeGroundedProductIndex({
@@ -362,8 +362,17 @@ function writeJson(path: string, value: unknown): void {
   writeFileSync(path, JSON.stringify(value, null, 2), "utf-8");
 }
 
-function readJson<T>(path: string): T {
-  return JSON.parse(readFileSync(path, "utf-8")) as T;
+function readJsonFile<T>(path: string, missingMessage: string): T {
+  if (!existsSync(path)) {
+    throw new Error(`${path}: ${missingMessage}`);
+  }
+
+  try {
+    return JSON.parse(readFileSync(path, "utf-8")) as T;
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(`Invalid JSON in ${path}: ${message}`);
+  }
 }
 
 function getProductIndexPath(projectRoot: string): string {
@@ -439,6 +448,14 @@ function parseArgs(argv: string[]): ParsedArgs {
   }
 
   const entryPatternsValue = values.get("--entry-patterns") ?? "";
+  const selectedModes = [
+    booleans.has("--prepare"),
+    booleans.has("--finalize"),
+    booleans.has("--fast"),
+  ].filter(Boolean).length;
+  if (selectedModes > 1) {
+    throw new Error("Choose only one of --prepare, --finalize, or --fast.");
+  }
 
   return {
     projectRoot,
