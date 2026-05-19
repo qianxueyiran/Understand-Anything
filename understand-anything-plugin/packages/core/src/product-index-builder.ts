@@ -2,8 +2,10 @@ import type { GraphEdge, GraphNode, KnowledgeGraph } from "./types.js";
 import type {
   ProductEvidence,
   ProductEvidenceRole,
+  ProductFact,
   ProductIndex,
   ProductSignal,
+  ProductSignalType,
   ProductTopic,
   ProductTopicKind,
 } from "./product-index.js";
@@ -73,6 +75,29 @@ export interface TopicContextPack {
   roots: string[];
   candidateFiles: ProductContextFile[];
   overflowFiles: string[];
+}
+
+export interface ProductExtractionFact {
+  type: "behavior" | "rule" | "display" | "data" | "integration" | "mapping" | "lifecycle";
+  text: string;
+  conditions: string[];
+  evidenceRefs: string[];
+  confidence: "confirmed" | "inferred" | "uncertain";
+}
+
+export interface ProductTopicExtraction {
+  topicId: string;
+  usedFiles: Array<{ fileId: string; reason: string }>;
+  ignoredFiles: Array<{ fileId: string; reason: string }>;
+  facts: ProductExtractionFact[];
+}
+
+export interface FinalizeGroundedProductIndexInput {
+  graph: KnowledgeGraph;
+  topics: NormalizedProductTopic[];
+  contextPacks: TopicContextPack[];
+  extractions: ProductTopicExtraction[];
+  options: ProductProfileOptions;
 }
 
 export interface ProductBoundaryCandidateOptions {
@@ -432,6 +457,137 @@ export function buildTopicContextPacks(
       overflowFiles: files.slice(maxFiles).map((file) => file.filePath),
     };
   });
+}
+
+export function finalizeGroundedProductIndex(input: FinalizeGroundedProductIndexInput): ProductIndex {
+  const { graph, topics: inputTopics, contextPacks, extractions, options } = input;
+  const analyzedAt = options.analyzedAt ?? graph.project.analyzedAt;
+  const nodeById = new Map(graph.nodes.map((node) => [node.id, node]));
+  const packByTopicId = new Map(contextPacks.map((pack) => [pack.topic.id, pack]));
+  const extractionByTopicId = new Map(extractions.map((extraction) => [extraction.topicId, extraction]));
+  const evidenceById = new Map<string, ProductEvidence>();
+  const facts: ProductFact[] = [];
+  const outputTopics: ProductTopic[] = [];
+  const warnings: ProductIndex["coverage"]["warnings"] = [];
+
+  for (const topic of inputTopics) {
+    const pack = packByTopicId.get(topic.id);
+    const extraction = extractionByTopicId.get(topic.id);
+    if (!pack || !extraction) {
+      continue;
+    }
+
+    const anchorById = indexAnchorsById(pack);
+    const factIds: string[] = [];
+    const topicEvidenceIds: string[] = [];
+    const entryEvidenceIds: string[] = [];
+
+    extraction.facts.forEach((extractionFact, factIndex) => {
+      const anchors = uniqueStrings(extractionFact.evidenceRefs)
+        .map((evidenceRef) => anchorById.get(evidenceRef))
+        .filter((anchor): anchor is ProductContextAnchor => anchor !== undefined)
+        .slice(0, 3);
+
+      if (anchors.length === 0) {
+        warnings.push({
+          code: "fact-without-evidence",
+          message: `Dropped fact for ${topic.id} because it did not reference valid evidence anchors.`,
+          topicId: topic.id,
+        });
+        return;
+      }
+
+      const evidenceIds = anchors.map((anchor) => {
+        const evidence = buildEvidenceFromAnchor(anchor, nodeById.get(anchor.nodeId), extractionFact.confidence);
+        if (!evidenceById.has(evidence.id)) {
+          evidenceById.set(evidence.id, evidence);
+        }
+        return evidence.id;
+      });
+      const fact: ProductFact = {
+        id: `fact:${topic.id}:${factIndex + 1}`,
+        topicIds: [topic.id],
+        type: extractionFact.type,
+        text: extractionFact.text,
+        conditions: extractionFact.conditions,
+        evidenceIds: uniqueStrings(evidenceIds),
+        confidence: extractionFact.confidence,
+        maturity: "summarized",
+      };
+
+      facts.push(fact);
+      factIds.push(fact.id);
+      topicEvidenceIds.push(...fact.evidenceIds);
+      entryEvidenceIds.push(
+        ...anchors
+          .filter((anchor) => anchor.type === "entry" || topic.rootNodeIds.includes(anchor.nodeId))
+          .map((anchor) => evidenceIdForAnchor(anchor)),
+      );
+    });
+
+    if (factIds.length === 0) {
+      continue;
+    }
+
+    outputTopics.push({
+      id: topic.id,
+      kind: topic.kind,
+      name: topic.name,
+      aliases: [],
+      summary: topic.summary,
+      status: "summarized",
+      sourceCandidateIds: topic.sourceCandidateIds,
+      factIds: uniqueStrings(factIds),
+      entryEvidenceIds: uniqueStrings(entryEvidenceIds).filter((evidenceId) => evidenceById.has(evidenceId)),
+      evidenceIds: uniqueStrings(topicEvidenceIds),
+      domainRefs: topic.domainRefs,
+    });
+  }
+
+  const outputFactIds = new Set(outputTopics.flatMap((topic) => topic.factIds));
+  const outputFacts = facts.filter((fact) => outputFactIds.has(fact.id));
+  const outputEvidenceIds = new Set([
+    ...outputTopics.flatMap((topic) => topic.entryEvidenceIds),
+    ...outputTopics.flatMap((topic) => topic.evidenceIds),
+    ...outputFacts.flatMap((fact) => fact.evidenceIds),
+  ]);
+  const evidence = Array.from(evidenceById.values()).filter((item) => outputEvidenceIds.has(item.id));
+
+  return {
+    version: "1.0.0",
+    kind: "product-index",
+    project: {
+      name: graph.project.name,
+      platforms: [options.platform],
+      languages: graph.project.languages,
+      frameworks: graph.project.frameworks,
+      analyzedAt,
+      gitCommitHash: graph.project.gitCommitHash,
+    },
+    sources: {
+      knowledgeGraph: {
+        path: ".understand-anything/knowledge-graph.json",
+        gitCommitHash: graph.project.gitCommitHash,
+        required: true,
+      },
+    },
+    topics: outputTopics,
+    facts: outputFacts,
+    evidence,
+    coverage: {
+      platformProfiles: [options.platform],
+      entryPoints: inputTopics.filter((topic) => topic.rootNodeIds.length > 0).length,
+      indexedTopics: outputTopics.length,
+      confirmedEvidence: evidence.filter((item) => item.confidence === "confirmed").length,
+      generatedFacts: outputFacts.length,
+      warnings,
+    },
+    quality: {
+      groundedFacts: outputFacts.length,
+      ignoredFiles: extractions.reduce((count, extraction) => count + extraction.ignoredFiles.length, 0),
+      overflowFiles: contextPacks.reduce((count, pack) => count + pack.overflowFiles.length, 0),
+    },
+  };
 }
 
 export function buildDeterministicProductIndex(
@@ -999,6 +1155,53 @@ function groupSignalsByNodeId(signals: ProductSignal[]): Map<string, ProductSign
     groups.set(signal.nodeId, list);
   }
   return groups;
+}
+
+function indexAnchorsById(pack: TopicContextPack): Map<string, ProductContextAnchor> {
+  const anchors = new Map<string, ProductContextAnchor>();
+  for (const file of pack.candidateFiles) {
+    for (const anchor of file.anchors) {
+      anchors.set(anchor.anchorId, anchor);
+    }
+  }
+  return anchors;
+}
+
+function buildEvidenceFromAnchor(
+  anchor: ProductContextAnchor,
+  node: GraphNode | undefined,
+  confidence: ProductEvidence["confidence"],
+): ProductEvidence {
+  const role = evidenceRoleFromAnchorType(anchor.type);
+  const signalTypes: ProductSignalType[] = [role];
+  const tokens = uniqueStrings([
+    ...extractTokens(anchor.text),
+    ...extractTokens(anchor.snippetSummary),
+    ...(node ? [...node.tags, node.name] : []),
+  ]).slice(0, 20);
+
+  return {
+    id: evidenceIdForAnchor(anchor),
+    role,
+    ...(node?.filePath ? { filePath: node.filePath } : {}),
+    ...(anchor.symbol ?? node?.name ? { symbol: anchor.symbol ?? node?.name } : {}),
+    ...(anchor.lineRange ?? node?.lineRange ? { lineRange: anchor.lineRange ?? node?.lineRange } : {}),
+    nodeId: anchor.nodeId,
+    nodeIds: [anchor.nodeId],
+    signalTypes,
+    tokens,
+    reason: anchor.text,
+    ...(anchor.snippetSummary || node?.summary ? { summary: anchor.snippetSummary || node?.summary } : {}),
+    confidence,
+  };
+}
+
+function evidenceIdForAnchor(anchor: ProductContextAnchor): string {
+  return anchor.anchorId.replace(/^anchor:/u, "evidence:");
+}
+
+function evidenceRoleFromAnchorType(anchorType: ProductContextAnchor["type"]): ProductEvidenceRole {
+  return anchorType;
 }
 
 function buildEvidenceFromNode(

@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import type { GraphEdge, GraphNode, KnowledgeGraph } from "../types.js";
+import { validateProductIndex } from "../product-index.js";
 import {
   buildProductBoundaryCandidates,
   buildTopicContextPacks,
+  finalizeGroundedProductIndex,
   normaliseProductTopics,
 } from "../product-index-builder.js";
 
@@ -158,5 +160,104 @@ describe("grounded product index builder", () => {
     ]);
     expect(new Set(anchors.map((anchor) => anchor.anchorId)).size).toBe(2);
     expect(anchors.map((anchor) => anchor.text)).toEqual(["校验会员播放权限", "读取播放配置"]);
+  });
+
+  it("finalizes facts and only promotes referenced anchors to evidence", () => {
+    const kg = graph([
+      {
+        id: "function:BootBroadcastReceiver.java:onReceive",
+        type: "function",
+        name: "onReceive",
+        filePath: "app/BootBroadcastReceiver.java",
+        lineRange: [18, 21],
+        summary: "Receives boot broadcasts.",
+        tags: ["receiver"],
+        complexity: "simple",
+        businessSignals: [{ type: "behavior", text: "接收开机广播并启动后续处理" }],
+      },
+    ]);
+    const topic = {
+      id: "topic:boot-receiver",
+      name: "开机广播调起",
+      summary: "开机广播触发首页初始化相关业务。",
+      kind: "capability" as const,
+      sourceCandidateIds: ["candidate:BootBroadcastReceiver"],
+      rootNodeIds: ["function:BootBroadcastReceiver.java:onReceive"],
+      domainRefs: [],
+    };
+    const packs = buildTopicContextPacks(kg, [topic]);
+    const evidenceRef = packs[0].candidateFiles[0].anchors[0].anchorId;
+
+    const index = finalizeGroundedProductIndex({
+      graph: kg,
+      topics: [topic],
+      contextPacks: packs,
+      extractions: [
+        {
+          topicId: "topic:boot-receiver",
+          usedFiles: [{ fileId: "file:app/BootBroadcastReceiver.java", reason: "承载开机广播接收" }],
+          ignoredFiles: [],
+          facts: [
+            {
+              type: "behavior",
+              text: "应用接收开机广播后会启动后续首页初始化处理。",
+              conditions: ["系统发出开机广播"],
+              evidenceRefs: [evidenceRef],
+              confidence: "confirmed",
+            },
+          ],
+        },
+      ],
+      options: { platform: "android", analyzedAt: "2026-05-19T00:00:00.000Z" },
+    });
+
+    expect(index.topics).toHaveLength(1);
+    expect(index.facts).toHaveLength(1);
+    expect(index.evidence).toHaveLength(1);
+    expect(index.topics[0].factIds).toEqual([index.facts[0].id]);
+    expect(index.facts[0].evidenceIds).toEqual([index.evidence[0].id]);
+    expect(index.evidence[0].lineRange).toEqual([18, 21]);
+    expect(validateProductIndex(index).success).toBe(true);
+  });
+
+  it("drops facts without valid evidence refs and removes empty topics", () => {
+    const kg = graph([]);
+    const topic = {
+      id: "topic:empty",
+      name: "空主题",
+      summary: "没有有效证据。",
+      kind: "capability" as const,
+      sourceCandidateIds: ["candidate:empty"],
+      rootNodeIds: [],
+      domainRefs: [],
+    };
+
+    const index = finalizeGroundedProductIndex({
+      graph: kg,
+      topics: [topic],
+      contextPacks: [{ topic, roots: [], candidateFiles: [], overflowFiles: [] }],
+      extractions: [
+        {
+          topicId: "topic:empty",
+          usedFiles: [],
+          ignoredFiles: [],
+          facts: [
+            {
+              type: "behavior",
+              text: "这条事实没有证据。",
+              conditions: [],
+              evidenceRefs: [],
+              confidence: "confirmed",
+            },
+          ],
+        },
+      ],
+      options: { platform: "android", analyzedAt: "2026-05-19T00:00:00.000Z" },
+    });
+
+    expect(index.topics).toHaveLength(0);
+    expect(index.facts).toHaveLength(0);
+    expect(index.evidence).toHaveLength(0);
+    expect(index.coverage.warnings.some((warning) => warning.code === "fact-without-evidence")).toBe(true);
   });
 });
