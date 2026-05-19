@@ -907,6 +907,12 @@ class BusinessSignalMergeTests(unittest.TestCase):
             len({(s["type"], s["text"]) for s in merged["businessSignals"]}),
             len(merged["businessSignals"]),
         )
+        allowed_types = {"entry", "behavior", "rule", "display", "data", "integration"}
+        signal_pairs = {(s["type"], s["text"]) for s in merged["businessSignals"]}
+        self.assertTrue(all(s["type"] in allowed_types for s in merged["businessSignals"]))
+        self.assertTrue(all(s["text"] for s in merged["businessSignals"]))
+        self.assertNotIn(("bad", "错误类型"), signal_pairs)
+        self.assertNotIn("", {s["text"] for s in merged["businessSignals"]})
         self.assertTrue(any("businessSignals" in line for line in report))
 
 
