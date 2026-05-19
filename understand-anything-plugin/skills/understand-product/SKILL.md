@@ -6,7 +6,7 @@ argument-hint: [--platform android] [--fast] [--entry-patterns <patterns>]
 
 # /understand-product
 
-生成 `.understand-anything/product-index.json` 产品知识索引。第一版要求当前项目已经运行 `/understand`，并且存在 `.understand-anything/knowledge-graph.json`。
+生成 `.understand-anything/product-index.json` 产品知识索引。当前项目必须已经运行 `/understand`，并且存在 `.understand-anything/knowledge-graph.json`。
 
 ## Phase 0: 准备路径
 
@@ -21,12 +21,10 @@ fi
 
 解析 `PLUGIN_ROOT` 时沿用 `/understand-domain` 的插件根目录解析策略：优先使用运行时注入变量，然后尝试各平台常见安装路径。
 
-## Phase 1: 确定性生成产品索引草稿
-
 支持的参数会透传给 CLI：
 
 - `--platform <name>`，默认 `android`
-- `--fast`，只执行确定性索引阶段
+- `--fast`，跳过 LLM 抽取，只使用确定性 fallback
 - `--entry-patterns <comma-separated patterns>`
 - `--max-depth <positive integer>`
 - `--max-nodes-per-topic <positive integer>`
@@ -34,40 +32,97 @@ fi
 - `--max-evidence-per-topic <positive integer>`
 - `--hub-degree-threshold <positive integer>`
 
-运行：
+## Phase 1: Prepare Topic Context Packs
+
+如果用户没有传 `--fast`，先运行 prepare：
 
 ```bash
-node "$PLUGIN_ROOT/dist/product-index-cli.js" "$PROJECT_ROOT" $ARGUMENTS
+node "$PLUGIN_ROOT/dist/product-index-cli.js" "$PROJECT_ROOT" --prepare $ARGUMENTS
 ```
 
-该命令生成：
+该命令读取：
 
 ```text
-$PROJECT_ROOT/.understand-anything/product-index.json
+$PROJECT_ROOT/.understand-anything/knowledge-graph.json
+$PROJECT_ROOT/.understand-anything/domain-graph.json
+```
+
+并写入：
+
+```text
+$PROJECT_ROOT/.understand-anything/intermediate/product-boundary-candidates.json
+$PROJECT_ROOT/.understand-anything/intermediate/product-context-packs.json
 $PROJECT_ROOT/.understand-anything/product-signals.jsonl
 ```
 
-`--fast` 表示只执行确定性索引阶段，不派发 LLM 增强 agent。确定性阶段会读取 `knowledge-graph.json`，可选读取 `domain-graph.json`，再基于入口、UI、规则、数据、集成等信号生成 topic、evidence 和 signals sidecar。
+`product-context-packs.json` 是后续 LLM agent 唯一可用于抽取产品事实的上下文。
 
-## Phase 2: 可选 LLM 归纳
+## Phase 2: LLM 事实抽取
 
-如果用户没有传 `--fast`，读取 `$PLUGIN_ROOT/agents/product-index-analyzer.md` 并派发 subagent。subagent 只能基于已有 `product-index.json` 和 `product-signals.jsonl` 做 topic 命名、去重和高置信 fact 归纳，不允许重新全项目找证据。
+如果用户没有传 `--fast`，派发 `$PLUGIN_ROOT/agents/product-index-analyzer.md`。
 
-subagent 将增强结果写入：
+agent 必须读取：
 
 ```text
-$PROJECT_ROOT/.understand-anything/intermediate/product-index-enhanced.json
+$PROJECT_ROOT/.understand-anything/intermediate/product-context-packs.json
 ```
 
-增强结果通过 CLI 或 core validator 校验成功后，覆盖 `.understand-anything/product-index.json`。
+并写入：
 
-## Phase 3: 完成输出
+```text
+$PROJECT_ROOT/.understand-anything/intermediate/product-index-extractions.json
+```
 
-输出中文摘要，包含：
+输出必须是 JSON 数组，每个元素为：
+
+```text
+{ topicId, usedFiles, ignoredFiles, facts }
+```
+
+facts 必须包含 `type/text/conditions/evidenceRefs/confidence`，且 `evidenceRefs` 只能引用 context packs 中已有的 anchorId。不要派发 agent 全项目搜索，不要要求 agent 新增文件或 anchor。
+
+## Phase 3: Finalize Product Index
+
+如果用户没有传 `--fast`，在 agent 写出 extractions 后运行 finalize：
+
+```bash
+node "$PLUGIN_ROOT/dist/product-index-cli.js" "$PROJECT_ROOT" --finalize $ARGUMENTS
+```
+
+该命令读取：
+
+```text
+$PROJECT_ROOT/.understand-anything/intermediate/product-context-packs.json
+$PROJECT_ROOT/.understand-anything/intermediate/product-index-extractions.json
+```
+
+并写入：
+
+```text
+$PROJECT_ROOT/.understand-anything/product-index.json
+$PROJECT_ROOT/.understand-anything/product-index-trace.json
+```
+
+trace 至少包含 contextPacks、extractions 和 warnings，便于排查 agent 输出被丢弃的原因。
+
+## Fast 模式
+
+如果用户传 `--fast`，跳过 Phase 1-3 的 LLM 编排，直接运行确定性 fallback：
+
+```bash
+node "$PLUGIN_ROOT/dist/product-index-cli.js" "$PROJECT_ROOT" --fast $ARGUMENTS
+```
+
+也可以运行不带 `--prepare/--finalize` 的 CLI；该路径会 prepare context packs，基于第一个可用 anchor 生成 inferred fact，然后 finalize 并保存 `product-index.json`。
+
+## 完成输出
+
+输出中文摘要，必须包含：
 
 - topics 数量
 - evidence 数量
 - facts 数量
 - signals 数量
-- 是否使用 LLM 增强
+- contextPacks 数量
+- 是否使用 LLM
 - 提示现在可以使用 `/understand-chat` 提问产品问题

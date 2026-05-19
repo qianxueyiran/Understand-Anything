@@ -1,7 +1,6 @@
-import { existsSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { isAbsolute, relative, resolve, join } from "node:path";
 import {
-  buildDeterministicProductIndex,
   buildProductSignals,
   loadDomainGraph,
   loadGraph,
@@ -10,14 +9,28 @@ import {
   type ProductSignal,
   type ProductProfileOptions,
 } from "@understand-anything/core";
+import {
+  buildProductBoundaryCandidates,
+  buildTopicContextPacks,
+  finalizeGroundedProductIndex,
+  normaliseProductTopics,
+  type ProductBoundaryCandidate,
+  type ProductContextAnchor,
+  type ProductTopicExtraction,
+  type TopicContextPack,
+} from "../packages/core/dist/product-index-builder.js";
 
 export interface ProductIndexCliResult {
   projectRoot: string;
   productIndexPath: string;
-  productSignalsPath: string;
+  productSignalsPath?: string;
+  contextPacksPath?: string;
+  tracePath?: string;
   topics: number;
+  facts: number;
   evidence: number;
   signals: number;
+  contextPacks: number;
 }
 
 export async function runProductIndexCli(
@@ -63,44 +76,306 @@ export async function runProductIndexCli(
     buildProductSignals(graph, builderOptions),
     options.projectRoot,
   );
-  const index = buildDeterministicProductIndex(
-    graph,
-    domainGraph,
-    builderOptions,
-  );
-
   const signalsPath = join(
     options.projectRoot,
     ".understand-anything",
     "product-signals.jsonl",
   );
+  writeProductSignalsSidecar(signalsPath, signals);
+
+  if (options.prepare && options.finalize) {
+    throw new Error("--prepare and --finalize cannot be used together.");
+  }
+
+  const businessSignalCount = countBusinessSignals(graph);
+  const intermediateDir = join(
+    options.projectRoot,
+    ".understand-anything",
+    "intermediate",
+  );
+  const contextPacksPath = join(
+    intermediateDir,
+    "product-context-packs.json",
+  );
+
+  if (options.prepare) {
+    const { candidates, contextPacks } = prepareGroundedProductContext(
+      graph,
+      domainGraph,
+      builderOptions,
+      signals,
+    );
+
+    mkdirSync(intermediateDir, { recursive: true });
+    writeJson(
+      join(intermediateDir, "product-boundary-candidates.json"),
+      candidates,
+    );
+    writeJson(contextPacksPath, contextPacks);
+
+    return {
+      projectRoot: options.projectRoot,
+      productIndexPath: getProductIndexPath(options.projectRoot),
+      productSignalsPath: signalsPath,
+      contextPacksPath,
+      topics: contextPacks.length,
+      facts: 0,
+      evidence: 0,
+      signals: businessSignalCount,
+      contextPacks: contextPacks.length,
+    };
+  }
+
+  if (options.finalize) {
+    const contextPacks = readJson<TopicContextPack[]>(contextPacksPath);
+    const extractions = readJson<ProductTopicExtraction[]>(
+      join(intermediateDir, "product-index-extractions.json"),
+    );
+    const topics = contextPacks.map((pack) => pack.topic);
+    const index = finalizeGroundedProductIndex({
+      graph,
+      topics,
+      contextPacks,
+      extractions,
+      options: builderOptions,
+    });
+    saveProductIndex(options.projectRoot, index);
+
+    const tracePath = join(
+      options.projectRoot,
+      ".understand-anything",
+      "product-index-trace.json",
+    );
+    writeJson(tracePath, {
+      contextPacks,
+      extractions,
+      warnings: index.coverage.warnings,
+    });
+
+    return {
+      projectRoot: options.projectRoot,
+      productIndexPath: getProductIndexPath(options.projectRoot),
+      productSignalsPath: signalsPath,
+      contextPacksPath,
+      tracePath,
+      topics: index.topics.length,
+      facts: index.facts.length,
+      evidence: index.evidence.length,
+      signals: businessSignalCount,
+      contextPacks: contextPacks.length,
+    };
+  }
+
+  const { contextPacks } = prepareGroundedProductContext(
+    graph,
+    domainGraph,
+    builderOptions,
+    signals,
+  );
+  const topics = contextPacks.map((pack) => pack.topic);
+  const extractions = buildFallbackProductExtractions(contextPacks);
+  const index = finalizeGroundedProductIndex({
+    graph,
+    topics,
+    contextPacks,
+    extractions,
+    options: builderOptions,
+  });
+
+  saveProductIndex(options.projectRoot, index);
+
+  return {
+    projectRoot: options.projectRoot,
+    productIndexPath: getProductIndexPath(options.projectRoot),
+    productSignalsPath: signalsPath,
+    topics: index.topics.length,
+    facts: index.facts.length,
+    evidence: index.evidence.length,
+    signals: businessSignalCount,
+    contextPacks: contextPacks.length,
+  };
+}
+
+function prepareGroundedProductContext(
+  graph: KnowledgeGraph,
+  domainGraph: KnowledgeGraph | undefined,
+  builderOptions: ProductProfileOptions,
+  signals: ProductSignal[],
+) {
+  const boundaryCandidates = buildProductBoundaryCandidates(
+    graph,
+    domainGraph,
+    builderOptions,
+  );
+  const needsFallbackSignals =
+    boundaryCandidates.length === 0 ||
+    boundaryCandidates.every(
+      (candidate) => candidate.businessSignals.length === 0,
+    );
+  const contextGraph = needsFallbackSignals
+    ? addFallbackBusinessSignals(graph, signals)
+    : graph;
+  const candidates =
+    boundaryCandidates.length > 0
+      ? boundaryCandidates
+      : buildFallbackBoundaryCandidates(contextGraph, signals);
+  const topics = normaliseProductTopics(candidates);
+  const contextPacks = buildTopicContextPacks(contextGraph, topics);
+
+  return { candidates, topics, contextPacks };
+}
+
+function addFallbackBusinessSignals(
+  graph: KnowledgeGraph,
+  signals: ProductSignal[],
+): KnowledgeGraph {
+  const signalByNodeId = new Map(signals.map((signal) => [signal.nodeId, signal]));
+
+  return {
+    ...graph,
+    nodes: graph.nodes.map((node) => {
+      if ((node.businessSignals?.length ?? 0) > 0) {
+        return node;
+      }
+
+      const signal = signalByNodeId.get(node.id);
+      const type = normaliseSignalType(signal?.types[0]);
+      if (!signal || !type) {
+        return node;
+      }
+
+      return {
+        ...node,
+        businessSignals: [
+          {
+            type,
+            text: node.summary || node.name,
+          },
+        ],
+      };
+    }),
+  };
+}
+
+function normaliseSignalType(
+  type: string | undefined,
+): "entry" | "behavior" | "rule" | "display" | "data" | "integration" | undefined {
+  if (
+    type === "entry" ||
+    type === "behavior" ||
+    type === "rule" ||
+    type === "display" ||
+    type === "data" ||
+    type === "integration"
+  ) {
+    return type;
+  }
+
+  return undefined;
+}
+
+function buildFallbackBoundaryCandidates(
+  graph: KnowledgeGraph,
+  signals: ProductSignal[],
+): ProductBoundaryCandidate[] {
+  const nodeById = new Map(graph.nodes.map((node) => [node.id, node]));
+
+  return signals.map((signal) => {
+    const node = nodeById.get(signal.nodeId);
+    return {
+      id: `candidate:${signal.nodeId}`,
+      rootNodeId: signal.nodeId,
+      name: signal.symbol || node?.name || signal.nodeId,
+      entryKind: signal.types[0] ?? "entry",
+      ...(signal.filePath ? { filePath: signal.filePath } : {}),
+      businessSignals: node?.businessSignals ?? [],
+      neighborNodeIds: [],
+      domainRefs: [],
+    };
+  });
+}
+
+function buildFallbackProductExtractions(
+  contextPacks: TopicContextPack[],
+): ProductTopicExtraction[] {
+  return contextPacks.map((pack) => {
+    const anchor = findFirstFileAnchor(pack);
+    return {
+      topicId: pack.topic.id,
+      usedFiles: anchor
+        ? [{ fileId: anchor.file.fileId, reason: "deterministic fallback" }]
+        : [],
+      ignoredFiles: [],
+      facts: anchor
+        ? [
+            {
+              type:
+                anchor.anchor.type === "entry" ? "behavior" : anchor.anchor.type,
+              text: `${pack.topic.name} 包含 ${anchor.anchor.text}。`,
+              conditions: [],
+              evidenceRefs: [anchor.anchor.anchorId],
+              confidence: "inferred",
+            },
+          ]
+        : [],
+    };
+  });
+}
+
+function findFirstFileAnchor(
+  pack: TopicContextPack,
+):
+  | {
+      file: TopicContextPack["candidateFiles"][number];
+      anchor: ProductContextAnchor;
+    }
+  | undefined {
+  for (const file of pack.candidateFiles) {
+    const anchor = file.anchors[0];
+    if (anchor) {
+      return { file, anchor };
+    }
+  }
+  return undefined;
+}
+
+function countBusinessSignals(graph: KnowledgeGraph): number {
+  return graph.nodes.reduce(
+    (count, node) => count + (node.businessSignals?.length ?? 0),
+    0,
+  );
+}
+
+function writeProductSignalsSidecar(
+  signalsPath: string,
+  signals: ProductSignal[],
+): void {
   writeFileSync(
     signalsPath,
     signals.map((signal) => JSON.stringify(signal)).join("\n") +
       (signals.length > 0 ? "\n" : ""),
     "utf-8",
   );
+}
 
-  saveProductIndex(options.projectRoot, index);
+function writeJson(path: string, value: unknown): void {
+  writeFileSync(path, JSON.stringify(value, null, 2), "utf-8");
+}
 
-  return {
-    projectRoot: options.projectRoot,
-    productIndexPath: join(
-      options.projectRoot,
-      ".understand-anything",
-      "product-index.json",
-    ),
-    productSignalsPath: signalsPath,
-    topics: index.topics.length,
-    evidence: index.evidence.length,
-    signals: signals.length,
-  };
+function readJson<T>(path: string): T {
+  return JSON.parse(readFileSync(path, "utf-8")) as T;
+}
+
+function getProductIndexPath(projectRoot: string): string {
+  return join(projectRoot, ".understand-anything", "product-index.json");
 }
 
 interface ParsedArgs {
   projectRoot: string;
   platform: string;
   fast: boolean;
+  prepare: boolean;
+  finalize: boolean;
   entryPatterns?: string[];
   maxDepth: number;
   maxNodesPerTopic: number;
@@ -119,7 +394,7 @@ const VALUE_FLAGS = new Set([
   "--hub-degree-threshold",
 ]);
 
-const BOOLEAN_FLAGS = new Set(["--fast"]);
+const BOOLEAN_FLAGS = new Set(["--fast", "--prepare", "--finalize"]);
 const NUMERIC_FLAGS = new Set([
   "--max-depth",
   "--max-nodes-per-topic",
@@ -169,6 +444,8 @@ function parseArgs(argv: string[]): ParsedArgs {
     projectRoot,
     platform: values.get("--platform") ?? "android",
     fast: booleans.has("--fast"),
+    prepare: booleans.has("--prepare"),
+    finalize: booleans.has("--finalize"),
     entryPatterns: entryPatternsValue
       ? entryPatternsValue
           .split(",")
