@@ -160,7 +160,7 @@ An interactive web dashboard opens with your codebase visualized as a graph — 
 /understand-knowledge ~/path/to/wiki
 ```
 
-`/understand-product` builds `.understand-anything/product-index.json`, a product knowledge index that maps product topics, candidate facts, and code evidence. It requires `/understand` to run first and does not change the default `/understand` pipeline.
+`/understand-product` builds `.understand-anything/product-index.json` from an existing knowledge graph. It uses business signals generated during `/understand`, constructs bounded Topic Context Packs, then extracts product facts with minimal code evidence.
 
 ---
 

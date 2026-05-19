@@ -158,7 +158,7 @@ Understand Anything 是一个 [Claude Code Plugin](https://code.claude.com/docs/
 /understand-knowledge ~/path/to/wiki
 ```
 
-`/understand-product` 会生成 `.understand-anything/product-index.json`，用于把产品主题、候选事实和代码证据建立索引。它要求先运行 `/understand`，不会改变 `/understand` 默认流程。
+`/understand-product` 基于已有 knowledge graph 生成产品知识索引。它优先消费 `/understand` 阶段沉淀的 businessSignals，构建有界的 Topic Context Pack，再生成产品事实和最小代码证据。
 
 ---
 
