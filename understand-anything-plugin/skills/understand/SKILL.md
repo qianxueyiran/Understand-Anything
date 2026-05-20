@@ -1,7 +1,7 @@
 ---
 name: understand
 description: Analyze a codebase to produce an interactive knowledge graph for understanding architecture, components, and relationships
-argument-hint: ["[path] [--full|--auto-update|--no-auto-update|--review|--language <lang>]"]
+argument-hint: ["[path] [--full|--auto-update|--no-auto-update|--review|--language <lang>|--scope <paths>|--shard <id>]"]
 ---
 
 # /understand
@@ -16,6 +16,8 @@ Analyze the current codebase and produce a `knowledge-graph.json` file in `.unde
   - `--no-auto-update` — Disable automatic graph updates (writes `autoUpdate: false` to `.understand-anything/config.json`)
   - `--review` — Run full LLM graph-reviewer instead of inline deterministic validation
   - `--language <lang>` — Generate descriptive textual content (summaries, descriptions, tags, titles, languageNotes, languageLesson) in the specified language. Accepts ISO 639-1 codes (`zh`, `ja`, `ko`, `en`, `es`, `fr`, `de`, etc.) or friendly names (`chinese`, `japanese`, `korean`, `english`, `spanish`, etc.). Locale variants supported: `zh-TW`, `zh-HK`, etc. Defaults to `zh` (Chinese). Stores preference in `.understand-anything/config.json` for consistency across incremental updates. Code identifiers, file paths, API names, framework/library names, schema fields, and standard technical keywords should remain in their original language when that preserves accuracy and searchability.
+  - `--scope <paths>` — Only analyze comma-separated project-relative paths; pair with `--shard` to generate a shard.
+  - `--shard <id>` — Save scoped analysis to `.understand-anything/shards/<id>.json`; requires `--scope`; id may contain only letters, numbers, `_`, and `-`.
   - A directory path (e.g. `/path/to/repo` or `../other-project`) — Analyze the given directory instead of the current working directory
 
 ---
@@ -131,6 +133,19 @@ Determine whether to run a full analysis or incremental update.
       > **Language directive**: Generate descriptive textual content (`description`、`summary`、`title`、`languageNotes`、`languageLesson`, and natural-language explanations) in **{language}**. Maintain technical accuracy while using natural, native-level phrasing in the target language. Keep code identifiers, file paths, schema fields, framework/library names, API names, and standard technical keywords in their original language when that preserves accuracy or searchability (e.g., "middleware", "hook", "barrel"). Tags may keep concise English technical keywords when they are standard and searchable; otherwise localize them naturally.
       ```
 
+3.7. **Scoped shard configuration:**
+    - Parse `$ARGUMENTS` for `--scope <paths>` and `--shard <id>`.
+    - If exactly one of `--scope` or `--shard` is present, report an error and **STOP**. Scoped shard mode requires both flags.
+    - If neither flag is present, set `SCOPED_SHARD_MODE=false` and continue the existing full/incremental flow.
+    - If both flags are present:
+      - Split `--scope <paths>` by comma, trim each item, and reject empty items.
+      - Treat every scope item as project-relative, resolve it against `$PROJECT_ROOT`, and store the original trimmed values as `$SCOPE_PATHS`.
+      - Reject any scope whose resolved path does not exist.
+      - Reject any scope whose resolved path is outside `$PROJECT_ROOT`.
+      - Validate `$SHARD_ID` with `^[A-Za-z0-9_-]+$`; if it fails, report an error and **STOP**.
+      - Set `SCOPED_SHARD_MODE=true`, `SHARD_ID=<id>`, `SCOPE_PATHS=<trimmed comma-separated project-relative paths>`, and `SCOPE_ROOTS=<absolute resolved scope roots>`.
+      - Scoped shard mode runs the normal analysis phases, but restricts scanning to the configured scope roots and saves to the shard output path in Phase 7.
+
  4. **Check for subdomain knowledge graphs to merge:**
    List all `*knowledge-graph*.json` files in `$PROJECT_ROOT/.understand-anything/` **excluding** `knowledge-graph.json` itself (e.g. `frontend-knowledge-graph.json`, `backend-knowledge-graph.json`). If any subdomain graphs exist, run the merge script bundled with this skill (located next to this SKILL.md file — use the skill directory path, not the project root):
    ```bash
@@ -235,6 +250,9 @@ Pass these parameters in the dispatch prompt:
 
 > Scan this project directory to discover all project files (including non-code files like configs, docs, infrastructure), detect languages and frameworks.
 > Project root: `$PROJECT_ROOT`
+> Scope mode: `$SCOPED_SHARD_MODE`
+> Scope roots: `$SCOPE_ROOTS`
+> If scope mode is true, include only files under these scope roots. Returned file paths must still be relative to `$PROJECT_ROOT`.
 > Write output to: `$PROJECT_ROOT/.understand-anything/intermediate/scan-result.json`
 
 After the subagent completes, read `$PROJECT_ROOT/.understand-anything/intermediate/scan-result.json` to get:
@@ -307,8 +325,15 @@ Fill in batch-specific parameters below and dispatch:
 > ...
 
 After ALL batches complete, run the merge-and-normalize script bundled with this skill (located next to this SKILL.md file — use the skill directory path, not the project root):
+
+Full mode:
 ```bash
 python <SKILL_DIR>/merge-batch-graphs.py $PROJECT_ROOT
+```
+
+Scoped shard mode:
+```bash
+python <SKILL_DIR>/merge-batch-graphs.py $PROJECT_ROOT --allow-external-edges
 ```
 
 This script reads all `batch-*.json` files from `$PROJECT_ROOT/.understand-anything/intermediate/`, then in one pass:
@@ -335,8 +360,15 @@ After batches complete:
 2. Remove old edges whose `source` or `target` references a removed node
 3. Write the pruned existing nodes/edges as `batch-existing.json` in the intermediate directory
 4. Run the same merge script — it will combine `batch-existing.json` with the fresh `batch-*.json` files:
+
+   Full mode:
    ```bash
    python <SKILL_DIR>/merge-batch-graphs.py $PROJECT_ROOT
+   ```
+
+   Scoped shard mode:
+   ```bash
+   python <SKILL_DIR>/merge-batch-graphs.py $PROJECT_ROOT --allow-external-edges
    ```
 
 ---
@@ -540,6 +572,17 @@ Assemble the full KnowledgeGraph JSON object:
 }
 ```
 
+In scoped shard mode, add top-level shard metadata before saving:
+
+```json
+{
+  "shard": {
+    "id": "<SHARD_ID>",
+    "scopes": ["<SCOPE_PATHS entries>"]
+  }
+}
+```
+
 1. Before writing the assembled graph, validate that:
    - `layers` is an array of objects with these required fields: `id`, `name`, `description`, `nodeIds`
    - `tour` is an array of objects with these required fields: `order`, `title`, `description`, `nodeIds`
@@ -682,7 +725,12 @@ Pass these parameters in the dispatch prompt:
 
 ## Phase 7 — SAVE
 
-1. Write the final knowledge graph to `$PROJECT_ROOT/.understand-anything/knowledge-graph.json`.
+1. Write the final knowledge graph:
+   - Full mode: write to `$PROJECT_ROOT/.understand-anything/knowledge-graph.json`.
+   - Scoped shard mode: write to `$PROJECT_ROOT/.understand-anything/shards/$SHARD_ID.json`, then refresh the sharded manifest:
+     ```bash
+     python <SKILL_DIR>/refresh-sharded-manifest.py $PROJECT_ROOT
+     ```
 
 2. Write metadata to `$PROJECT_ROOT/.understand-anything/meta.json`:
    ```json
@@ -720,7 +768,7 @@ Pass these parameters in the dispatch prompt:
    - Layers identified (with names)
    - Tour steps generated (count)
    - Any warnings from the reviewer
-   - Path to the output file: `$PROJECT_ROOT/.understand-anything/knowledge-graph.json`
+   - Path to the output file (`$PROJECT_ROOT/.understand-anything/knowledge-graph.json` in full mode, or `$PROJECT_ROOT/.understand-anything/shards/$SHARD_ID.json` in scoped shard mode)
 
 5. Only automatically launch the dashboard by invoking the `/understand-dashboard` skill if final graph validation passed after normalization/review fixes.
    If final validation did not pass, report that the graph was saved with warnings and dashboard launch was skipped.
