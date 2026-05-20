@@ -1,4 +1,5 @@
 export * from "./types.js";
+export * from "./sharded-manifest.js";
 export * from "./persistence/index.js";
 export {
   KnowledgeGraphSchema,
