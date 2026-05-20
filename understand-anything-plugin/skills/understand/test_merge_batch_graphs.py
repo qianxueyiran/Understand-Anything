@@ -823,6 +823,64 @@ class LinkTestsTests(unittest.TestCase):
 class MergeIntegrationTests(unittest.TestCase):
     """Verify the linker is wired into merge_and_normalize correctly."""
 
+    def test_full_mode_drops_dangling_edges(self) -> None:
+        batch = {
+            "nodes": [
+                _file_node("src/local.ts"),
+            ],
+            "edges": [
+                {
+                    "source": "file:src/local.ts",
+                    "target": "file:src/external.ts",
+                    "type": "imports",
+                    "direction": "forward",
+                    "weight": 0.7,
+                },
+            ],
+        }
+
+        assembled, report = mbg.merge_and_normalize([batch])
+
+        self.assertEqual(assembled["edges"], [])
+        self.assertTrue(
+            any("dropped, missing target" in line for line in report),
+            "\n".join(report),
+        )
+
+    def test_shard_mode_preserves_external_target_edges(self) -> None:
+        batch = {
+            "nodes": [
+                _file_node("src/local.ts"),
+            ],
+            "edges": [
+                {
+                    "source": "file:src/local.ts",
+                    "target": "file:src/external.ts",
+                    "type": "imports",
+                    "direction": "forward",
+                    "weight": 0.7,
+                },
+            ],
+        }
+
+        assembled, report = mbg.merge_and_normalize([batch], allow_external_edges=True)
+
+        self.assertEqual(len(assembled["edges"]), 1)
+        edge = assembled["edges"][0]
+        self.assertEqual(edge["target"], "file:src/external.ts")
+        self.assertTrue(edge["external"])
+        self.assertEqual(edge["externalReason"], "missing target in current shard")
+        self.assertTrue(
+            any("external edges preserved" in line for line in report),
+            "\n".join(report),
+        )
+
+    def test_cli_accepts_allow_external_edges_flag(self) -> None:
+        args = mbg.parse_args(["/tmp/project", "--allow-external-edges"])
+
+        self.assertEqual(args.project_root, "/tmp/project")
+        self.assertIs(args.allow_external_edges, True)
+
     def test_linker_runs_during_merge(self) -> None:
         batch = {
             "nodes": [

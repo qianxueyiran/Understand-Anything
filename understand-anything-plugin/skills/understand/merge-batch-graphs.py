@@ -9,7 +9,7 @@ Called at the end of Phase 2 of /understand. Phase 3 (ASSEMBLE REVIEW)
 then reviews the output for semantic issues the script cannot catch.
 
 Usage:
-    python merge-batch-graphs.py <project-root>
+    python merge-batch-graphs.py <project-root> [--allow-external-edges]
 
 Input:
     <project-root>/.understand-anything/intermediate/batch-*.json
@@ -18,6 +18,7 @@ Output:
     <project-root>/.understand-anything/intermediate/assembled-graph.json
 """
 
+import argparse
 import json
 import os
 import re
@@ -748,7 +749,10 @@ def link_tests(
 
 # ── Main merge + normalize ────────────────────────────────────────────────
 
-def merge_and_normalize(batches: list[dict[str, Any]]) -> tuple[dict[str, Any], list[str]]:
+def merge_and_normalize(
+    batches: list[dict[str, Any]],
+    allow_external_edges: bool = False,
+) -> tuple[dict[str, Any], list[str]]:
     """Merge batch results and normalize. Returns (assembled_graph, report_lines)."""
 
     # ── Pattern counters for "Fixed" report ──────────────────────────
@@ -850,6 +854,7 @@ def merge_and_normalize(batches: list[dict[str, Any]]) -> tuple[dict[str, Any], 
 
     # ── Step 6: Deduplicate edges, drop dangling ─────────────────────
     node_ids = set(nodes_by_id.keys())
+    external_edges_preserved = 0
     # Direction is part of the dedup key so a `forward` edge does not silently
     # overwrite a `bidirectional` one (or vice versa); they're different
     # semantic relationships that the dashboard renders distinctly.
@@ -863,11 +868,21 @@ def merge_and_normalize(batches: list[dict[str, Any]]) -> tuple[dict[str, Any], 
         if src not in node_ids or tgt not in node_ids:
             missing = []
             if src not in node_ids:
-                missing.append(f"source '{src}'")
+                missing.append("source")
             if tgt not in node_ids:
-                missing.append(f"target '{tgt}'")
-            unfixable.append(f"Edge {src} → {tgt} ({etype}): dropped, missing {', '.join(missing)}")
-            continue
+                missing.append("target")
+            if allow_external_edges:
+                edge["external"] = True
+                edge["externalReason"] = f"missing {' and '.join(missing)} in current shard"
+                external_edges_preserved += 1
+            else:
+                missing_details = []
+                if src not in node_ids:
+                    missing_details.append(f"source '{src}'")
+                if tgt not in node_ids:
+                    missing_details.append(f"target '{tgt}'")
+                unfixable.append(f"Edge {src} → {tgt} ({etype}): dropped, missing {', '.join(missing_details)}")
+                continue
 
         key = (src, tgt, etype, direction)
         existing = edges_by_key.get(key)
@@ -922,6 +937,13 @@ def merge_and_normalize(batches: list[dict[str, Any]]) -> tuple[dict[str, Any], 
         report.append("Business signals:")
         report.append(f"  {business_signal_nodes:>4} × nodes with businessSignals preserved")
         report.append(f"  {business_signal_dropped:>4} × malformed/duplicate/over-cap businessSignals dropped")
+
+    # Shard mode section — external endpoints are expected when only a scoped
+    # subset of nodes is assembled.
+    if external_edges_preserved:
+        report.append("")
+        report.append("Shard mode:")
+        report.append(f"  {external_edges_preserved:>4} × external edges preserved for shard mode")
 
     # Could not fix section — unknown patterns (grouped) + individual details
     unfixable_total = (
@@ -1046,12 +1068,23 @@ def recover_imports_from_scan(
 
 # ── Main ──────────────────────────────────────────────────────────────────
 
-def main() -> None:
-    if len(sys.argv) < 2:
-        print("Usage: python merge-batch-graphs.py <project-root>", file=sys.stderr)
-        sys.exit(1)
+def parse_args(argv: list[str]) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Merge and normalize batch analysis results.",
+    )
+    parser.add_argument("project_root")
+    parser.add_argument(
+        "--allow-external-edges",
+        action="store_true",
+        help="Preserve edges whose source or target is outside the current shard.",
+    )
+    return parser.parse_args(argv)
 
-    project_root = Path(sys.argv[1]).resolve()
+
+def main() -> None:
+    args = parse_args(sys.argv[1:])
+
+    project_root = Path(args.project_root).resolve()
     intermediate_dir = project_root / ".understand-anything" / "intermediate"
 
     if not intermediate_dir.is_dir():
@@ -1086,7 +1119,10 @@ def main() -> None:
         sys.exit(1)
 
     # Merge and normalize
-    assembled, report = merge_and_normalize(batches)
+    assembled, report = merge_and_normalize(
+        batches,
+        allow_external_edges=args.allow_external_edges,
+    )
 
     # Recover any imports edges file-analyzer batches dropped despite
     # `batchImportData` containing them. The project-scanner's importMap
