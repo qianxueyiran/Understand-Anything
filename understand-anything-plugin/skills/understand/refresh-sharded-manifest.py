@@ -35,6 +35,7 @@ def refresh_manifest(project_root: str | Path) -> dict[str, Any]:
         shard_meta = graph.get("shard") if isinstance(graph.get("shard"), dict) else {}
         shard_id = shard_meta.get("id") if isinstance(shard_meta.get("id"), str) else shard_path.stem
         scopes = shard_meta.get("scopes") if isinstance(shard_meta.get("scopes"), list) else []
+        project = graph.get("project") if isinstance(graph.get("project"), dict) else {}
 
         node_count = len(nodes)
         edge_count = len(edges)
@@ -43,19 +44,21 @@ def refresh_manifest(project_root: str | Path) -> dict[str, Any]:
         shards.append(
             {
                 "id": shard_id,
-                "file": f"shards/{shard_path.name}",
+                "path": f"shards/{shard_path.name}",
                 "scopes": scopes,
+                "updatedAt": _normalize_timestamp(project.get("analyzedAt")),
+                "gitCommitHash": project.get("gitCommitHash"),
                 "nodeCount": node_count,
                 "edgeCount": edge_count,
             }
         )
 
-        project = graph.get("project")
-        if isinstance(project, dict):
+        if project:
             projects.append(project)
 
     manifest = {
         "kind": "codebase-sharded",
+        "version": "1.0.0",
         "project": _merge_projects(projects),
         "overview": {
             "summary": _build_summary(len(shards), total_nodes, total_edges),
@@ -106,6 +109,12 @@ def _first_present(projects: list[dict[str, Any]], key: str) -> Any:
         if value is not None:
             return value
     return None
+
+
+def _normalize_timestamp(value: Any) -> Any:
+    if isinstance(value, str) and value.endswith("Z") and "." not in value:
+        return value[:-1] + ".000Z"
+    return value
 
 
 def _build_summary(shard_count: int, node_count: int, edge_count: int) -> str:

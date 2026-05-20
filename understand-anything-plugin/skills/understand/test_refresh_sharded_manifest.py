@@ -66,11 +66,16 @@ class RefreshShardedManifestTests(unittest.TestCase):
             manifest = refresh_manifest(root)
 
             self.assertEqual(manifest["kind"], "codebase-sharded")
+            self.assertEqual(manifest["version"], "1.0.0")
             self.assertEqual(manifest["overview"]["shardCount"], 2)
             self.assertEqual(manifest["overview"]["nodeCount"], 3)
             self.assertEqual(manifest["overview"]["edgeCount"], 3)
             self.assertEqual([shard["id"] for shard in manifest["shards"]], ["home", "player"])
             self.assertEqual(manifest["shards"][0]["scopes"], ["a_home", "a_home_api"])
+            self.assertEqual(manifest["shards"][0]["path"], "shards/home.json")
+            self.assertEqual(manifest["shards"][0]["updatedAt"], "2026-05-20T00:00:00.000Z")
+            self.assertEqual(manifest["shards"][0]["gitCommitHash"], "abc123")
+            self.assertNotIn("file", manifest["shards"][0])
 
             output_path = root / ".understand-anything" / "knowledge-graph.json"
             self.assertTrue(output_path.exists())
