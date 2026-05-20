@@ -1,7 +1,7 @@
 ---
 name: understand-domain
 description: Extract business domain knowledge from a codebase and generate an interactive domain flow graph. Works standalone (lightweight scan) or derives from an existing /understand knowledge graph.
-argument-hint: [--full]
+argument-hint: [--full] [--shard <id>] [--refresh-shards]
 ---
 
 # /understand-domain
@@ -86,11 +86,24 @@ fi
 
 Use `$PLUGIN_ROOT` for every reference to agent definitions in subsequent phases.
 
+### Phase 0.5: Parse Shard Mode
+
+解析参数并确定是否进入分片模式：
+
+- `--shard <id>`：只从 `$PROJECT_ROOT/.understand-anything/shards/<id>.json` 派生一个 domain shard。
+- `--refresh-shards`：只运行 `python "$PLUGIN_ROOT/skills/understand-domain/refresh-domain-sharded-manifest.py" "$PROJECT_ROOT"` 后停止；不要运行 LLM，也不要读取任何 shard 内容。
+- shard id 必须匹配 `^[A-Za-z0-9_-]+$`；不匹配时停止并提示用户传入合法 id。
+- 分片模式读取 `knowledge-graph.json` 时，先 raw JSON 读取并检查顶层 `kind`，不要先按完整 `KnowledgeGraph` 解析。
+
 ### Phase 1: Detect Existing Graph
 
 1. Check if `$PROJECT_ROOT/.understand-anything/knowledge-graph.json` exists
-2. If it exists AND `--full` was NOT passed → proceed to Phase 3 (derive from graph)
-3. Otherwise → proceed to Phase 2 (lightweight scan)
+2. If `--refresh-shards` was passed → run `python "$PLUGIN_ROOT/skills/understand-domain/refresh-domain-sharded-manifest.py" "$PROJECT_ROOT"` and stop
+3. If it exists, raw JSON read only the top-level `kind` before any full graph parsing
+4. If root kind is `codebase-sharded` and neither `--shard` nor `--refresh-shards` was passed → tell the user to rerun with `--shard <id>` or `--refresh-shards`; do not load all shards
+5. If `--shard <id>` was passed → proceed to Phase 3 using only `$PROJECT_ROOT/.understand-anything/shards/$SHARD_ID.json`
+6. If it exists AND `--full` was NOT passed → proceed to Phase 3 (derive from graph)
+7. Otherwise → proceed to Phase 2 (lightweight scan)
 
 ### Phase 2: Lightweight Scan (Path 1)
 
@@ -111,7 +124,7 @@ The preprocessing script does NOT produce a domain graph — it produces **raw m
 
 ### Phase 3: Derive from Existing Graph (Path 2)
 
-1. Read `$PROJECT_ROOT/.understand-anything/knowledge-graph.json`
+1. Read `$PROJECT_ROOT/.understand-anything/knowledge-graph.json`; in shard mode, read only `$PROJECT_ROOT/.understand-anything/shards/$SHARD_ID.json`
 2. Format the graph data as structured context:
    - All nodes with their types, names, summaries, and tags
    - All edges with their types (especially `calls`, `imports`, `contains`)
@@ -125,6 +138,7 @@ The preprocessing script does NOT produce a domain graph — it produces **raw m
 1. Read the domain-analyzer agent prompt from `$PLUGIN_ROOT/agents/domain-analyzer.md`
 2. Dispatch a subagent with the domain-analyzer prompt + the context from Phase 2 or 3
 3. The agent writes its output to `$PROJECT_ROOT/.understand-anything/intermediate/domain-analysis.json`
+4. In shard mode, the agent writes its output to `$PROJECT_ROOT/.understand-anything/intermediate/domain-shards/$SHARD_ID/domain-analysis.json`
 
 ### Phase 5: Validate and Save
 
@@ -132,9 +146,11 @@ The preprocessing script does NOT produce a domain graph — it produces **raw m
 2. Validate using the standard graph validation pipeline (the schema now supports domain/flow/step types)
 3. If validation fails, log warnings but save what's valid (error tolerance)
 4. Save to `$PROJECT_ROOT/.understand-anything/domain-graph.json`
-5. Clean up `$PROJECT_ROOT/.understand-anything/intermediate/domain-analysis.json` and `$PROJECT_ROOT/.understand-anything/intermediate/domain-context.json`
+5. In shard mode, save to `$PROJECT_ROOT/.understand-anything/domain-shards/$SHARD_ID.json`, then run `python "$PLUGIN_ROOT/skills/understand-domain/refresh-domain-sharded-manifest.py" "$PROJECT_ROOT"` to refresh `$PROJECT_ROOT/.understand-anything/domain-graph.json`
+6. Clean up `$PROJECT_ROOT/.understand-anything/intermediate/domain-analysis.json` and `$PROJECT_ROOT/.understand-anything/intermediate/domain-context.json`; in shard mode, clean up `$PROJECT_ROOT/.understand-anything/intermediate/domain-shards/$SHARD_ID/domain-analysis.json`
 
 ### Phase 6: Launch Dashboard
 
 1. Auto-trigger `/understand-dashboard` to visualize the domain graph
 2. The dashboard will detect `domain-graph.json` and show the domain view by default
+3. In shard mode, do not automatically launch the dashboard
