@@ -27,11 +27,12 @@ Analyze the current codebase and produce a `knowledge-graph.json` file in `.unde
 Determine whether to run a full analysis or incremental update.
 
 1. **Resolve `PROJECT_ROOT`:**
-   - Parse `$ARGUMENTS` for a non-flag token (any argument that does not start with `--`). If found, treat it as the target directory path.
+   - Parse `$ARGUMENTS` for the first non-flag token that is not the value of a known value-taking flag. When resolving the directory path, ignore these flags and their immediately following values: `--language <lang>`, `--scope <paths>`, and `--shard <id>`. If a remaining non-flag token is found, treat it as the target directory path.
      - If the path is relative, resolve it against the current working directory.
      - Verify the resolved path exists and is a directory (run `test -d <path>`). If it does not exist or is not a directory, report an error to the user and **STOP**.
      - Set `PROJECT_ROOT` to the resolved absolute path.
    - If no directory path argument is found, set `PROJECT_ROOT` to the current working directory.
+   - If both a directory path argument and `--scope` are provided, scope entries are still project-relative paths resolved against the final `PROJECT_ROOT`.
    - **Worktree redirect.** If `PROJECT_ROOT` is inside a git worktree (not the main checkout), redirect output to the main repository root. Worktrees managed by Claude Code are ephemeral — `.understand-anything/` written there is destroyed when the session ends, taking the knowledge graph with it (issue #133). Detect a worktree by comparing `git rev-parse --git-dir` against `git rev-parse --git-common-dir`; in a normal checkout or submodule they resolve to the same path, in a worktree they differ and the parent of `--git-common-dir` is the main repo root.
 
      ```bash
