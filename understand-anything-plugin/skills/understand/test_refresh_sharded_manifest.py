@@ -81,6 +81,40 @@ class RefreshShardedManifestTests(unittest.TestCase):
             self.assertTrue(output_path.exists())
             self.assertEqual(json.loads(output_path.read_text())["kind"], "codebase-sharded")
 
+    def test_prefers_top_level_shard_lifecycle_metadata(self):
+        refresh_manifest = load_refresh_manifest()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            shards_dir = root / ".understand-anything" / "shards"
+            shards_dir.mkdir(parents=True)
+
+            self.write_json(
+                shards_dir / "home.json",
+                {
+                    "shard": {
+                        "id": "home",
+                        "scopes": ["src/home"],
+                        "updatedAt": "shard-time",
+                        "gitCommitHash": "shard-hash",
+                    },
+                    "project": {
+                        "name": "Demo",
+                        "analyzedAt": "project-time",
+                        "gitCommitHash": "project-hash",
+                    },
+                    "nodes": [{"id": "home.ts"}],
+                    "edges": [],
+                },
+            )
+
+            manifest = refresh_manifest(root)
+
+            self.assertEqual(manifest["shards"][0]["updatedAt"], "shard-time")
+            self.assertEqual(manifest["shards"][0]["gitCommitHash"], "shard-hash")
+            self.assertEqual(manifest["project"]["analyzedAt"], "shard-time")
+            self.assertEqual(manifest["project"]["gitCommitHash"], "shard-hash")
+
     def test_skips_malformed_shard_files(self):
         refresh_manifest = load_refresh_manifest()
 

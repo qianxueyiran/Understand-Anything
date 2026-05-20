@@ -36,6 +36,10 @@ def refresh_manifest(project_root: str | Path) -> dict[str, Any]:
         shard_id = shard_meta.get("id") if isinstance(shard_meta.get("id"), str) else shard_path.stem
         scopes = shard_meta.get("scopes") if isinstance(shard_meta.get("scopes"), list) else []
         project = graph.get("project") if isinstance(graph.get("project"), dict) else {}
+        updated_at = _first_present_value(shard_meta.get("updatedAt"), project.get("analyzedAt"))
+        git_commit_hash = _first_present_value(
+            shard_meta.get("gitCommitHash"), project.get("gitCommitHash")
+        )
 
         node_count = len(nodes)
         edge_count = len(edges)
@@ -46,15 +50,20 @@ def refresh_manifest(project_root: str | Path) -> dict[str, Any]:
                 "id": shard_id,
                 "path": f"shards/{shard_path.name}",
                 "scopes": scopes,
-                "updatedAt": _normalize_timestamp(project.get("analyzedAt")),
-                "gitCommitHash": project.get("gitCommitHash"),
+                "updatedAt": _normalize_timestamp(updated_at),
+                "gitCommitHash": git_commit_hash,
                 "nodeCount": node_count,
                 "edgeCount": edge_count,
             }
         )
 
         if project:
-            projects.append(project)
+            project_for_manifest = dict(project)
+            if updated_at is not None:
+                project_for_manifest["analyzedAt"] = _normalize_timestamp(updated_at)
+            if git_commit_hash is not None:
+                project_for_manifest["gitCommitHash"] = git_commit_hash
+            projects.append(project_for_manifest)
 
     manifest = {
         "kind": "codebase-sharded",
@@ -117,6 +126,13 @@ def _merge_projects(projects: list[dict[str, Any]]) -> dict[str, Any]:
 def _first_present(projects: list[dict[str, Any]], key: str) -> Any:
     for project in projects:
         value = project.get(key)
+        if value is not None:
+            return value
+    return None
+
+
+def _first_present_value(*values: Any) -> Any:
+    for value in values:
         if value is not None:
             return value
     return None

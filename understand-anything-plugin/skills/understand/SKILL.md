@@ -357,6 +357,8 @@ Include the script's warnings in `$PHASE_WARNINGS` for the reviewer.
 
 ### Incremental update path
 
+This path applies only when `SCOPED_SHARD_MODE=false`. Scoped shard mode always runs scoped full analysis for the requested scope roots and does not use the main graph incremental update path.
+
 Use the changed files list from Phase 0. Batch and dispatch file-analyzer subagents using the same process as above (20-30 files per batch, up to 5 concurrent, with batchImportData constructed from $IMPORT_MAP), but only for changed files.
 
 After batches complete:
@@ -364,15 +366,8 @@ After batches complete:
 2. Remove old edges whose `source` or `target` references a removed node
 3. Write the pruned existing nodes/edges as `batch-existing.json` in the intermediate directory
 4. Run the same merge script — it will combine `batch-existing.json` with the fresh `batch-*.json` files:
-
-   Full mode:
    ```bash
    python <SKILL_DIR>/merge-batch-graphs.py $PROJECT_ROOT
-   ```
-
-   Scoped shard mode:
-   ```bash
-   python <SKILL_DIR>/merge-batch-graphs.py $PROJECT_ROOT --allow-external-edges
    ```
 
 ---
