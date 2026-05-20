@@ -6,7 +6,7 @@ import {
   rmSync,
   writeFileSync,
 } from "node:fs";
-import { isAbsolute, relative, resolve, join } from "node:path";
+import { dirname, isAbsolute, relative, resolve, join } from "node:path";
 import {
   buildProductSignals,
   loadDomainGraph,
@@ -16,6 +16,11 @@ import {
   type ProductSignal,
   type ProductProfileOptions,
 } from "@understand-anything/core";
+import {
+  buildProductShardedManifest,
+  getTopLevelKind,
+  validateShardId,
+} from "@understand-anything/core/sharded-manifest";
 import {
   buildProductBoundaryCandidates,
   buildTopicContextPacks,
@@ -60,17 +65,20 @@ export async function runProductIndexCli(
     );
   }
 
-  const loadedGraph = loadGraph(options.projectRoot);
-  if (!loadedGraph) {
-    throw new Error("Failed to load knowledge graph.");
+  if (options.refreshShards) {
+    const productIndexPath = refreshProductShardedManifest(options.projectRoot);
+    return {
+      projectRoot: options.projectRoot,
+      productIndexPath,
+      topics: 0,
+      facts: 0,
+      evidence: 0,
+      signals: 0,
+      contextPacks: 0,
+    };
   }
 
-  const loadedDomainGraph =
-    loadDomainGraph(options.projectRoot, { validate: false }) ?? undefined;
-  const graph = sanitiseKnowledgeGraphFilePaths(loadedGraph, options.projectRoot);
-  const domainGraph = loadedDomainGraph
-    ? sanitiseKnowledgeGraphFilePaths(loadedDomainGraph, options.projectRoot)
-    : undefined;
+  const { graph, domainGraph } = loadProductGraphInputs(options, graphPath);
 
   const builderOptions: ProductProfileOptions = {
     platform: options.platform,
@@ -87,19 +95,11 @@ export async function runProductIndexCli(
     buildProductSignals(graph, builderOptions),
     options.projectRoot,
   );
-  const signalsPath = join(
-    options.projectRoot,
-    ".understand-anything",
-    "product-signals.jsonl",
-  );
+  const signalsPath = getProductSignalsPath(options.projectRoot, options.shardId);
   writeProductSignalsSidecar(signalsPath, signals);
 
   const businessSignalCount = countBusinessSignals(graph);
-  const intermediateDir = join(
-    options.projectRoot,
-    ".understand-anything",
-    "intermediate",
-  );
+  const intermediateDir = getIntermediateDir(options.projectRoot, options.shardId);
   const boundaryCandidatesPath = join(
     intermediateDir,
     "product-boundary-candidates.json",
@@ -137,7 +137,7 @@ export async function runProductIndexCli(
 
     return {
       projectRoot: options.projectRoot,
-      productIndexPath: getProductIndexPath(options.projectRoot),
+      productIndexPath: getProductIndexPath(options.projectRoot, options.shardId),
       productSignalsPath: signalsPath,
       topics: 0,
       facts: 0,
@@ -166,7 +166,7 @@ export async function runProductIndexCli(
 
     return {
       projectRoot: options.projectRoot,
-      productIndexPath: getProductIndexPath(options.projectRoot),
+      productIndexPath: getProductIndexPath(options.projectRoot, options.shardId),
       productSignalsPath: signalsPath,
       contextPacksPath,
       topics: topics.length,
@@ -210,10 +210,15 @@ export async function runProductIndexCli(
       options: builderOptions,
       validationWarnings,
     });
-    saveProductIndex(options.projectRoot, index);
+    if (options.shardId) {
+      writeJson(getProductIndexPath(options.projectRoot, options.shardId), index);
+    } else {
+      saveProductIndex(options.projectRoot, index);
+    }
 
     const tracePath = writeProductIndexTrace(
       options.projectRoot,
+      options.shardId,
       buildProductIndexTrace({
         boundaryCandidates: candidates,
         topicNormalization: topicValidation.normalization,
@@ -225,7 +230,7 @@ export async function runProductIndexCli(
 
     return {
       projectRoot: options.projectRoot,
-      productIndexPath: getProductIndexPath(options.projectRoot),
+      productIndexPath: getProductIndexPath(options.projectRoot, options.shardId),
       productSignalsPath: signalsPath,
       contextPacksPath,
       tracePath,
@@ -237,19 +242,96 @@ export async function runProductIndexCli(
     };
   }
 
-  const exhaustiveStage: never = options.stage;
-  throw new Error(`Unsupported product-index stage: ${exhaustiveStage}`);
+  throw new Error(`Unsupported product-index stage: ${String(options.stage)}`);
+}
+
+function loadProductGraphInputs(
+  options: ParsedArgs,
+  graphPath: string,
+): {
+  graph: KnowledgeGraph;
+  domainGraph?: KnowledgeGraph;
+} {
+  if (options.shardId) {
+    const rootGraph = readJsonFile<unknown>(
+      graphPath,
+      "knowledge-graph.json not found. 请先运行 /understand。",
+    );
+    if (getTopLevelKind(rootGraph) !== "codebase-sharded") {
+      throw new Error("当前项目不是 sharded code graph。");
+    }
+
+    const shardGraphPath = join(
+      options.projectRoot,
+      ".understand-anything",
+      "shards",
+      `${options.shardId}.json`,
+    );
+    if (!existsSync(shardGraphPath)) {
+      throw new Error(
+        `${shardGraphPath} not found. 请先运行 /understand --scope ... --shard ${options.shardId}。`,
+      );
+    }
+
+    const rawGraph = readJsonFile<KnowledgeGraph>(
+      shardGraphPath,
+      `shards/${options.shardId}.json not found.`,
+    );
+    const domainShardPath = join(
+      options.projectRoot,
+      ".understand-anything",
+      "domain-shards",
+      `${options.shardId}.json`,
+    );
+    const rawDomainGraph = existsSync(domainShardPath)
+      ? readJsonFile<KnowledgeGraph>(
+          domainShardPath,
+          `domain-shards/${options.shardId}.json not found.`,
+        )
+      : undefined;
+
+    return {
+      graph: sanitiseKnowledgeGraphFilePaths(rawGraph, options.projectRoot),
+      domainGraph: rawDomainGraph
+        ? sanitiseKnowledgeGraphFilePaths(rawDomainGraph, options.projectRoot)
+        : undefined,
+    };
+  }
+
+  const loadedGraph = loadGraph(options.projectRoot);
+  if (!loadedGraph) {
+    throw new Error("Failed to load knowledge graph.");
+  }
+
+  const loadedDomainGraph =
+    loadDomainGraph(options.projectRoot, { validate: false }) ?? undefined;
+
+  return {
+    graph: sanitiseKnowledgeGraphFilePaths(loadedGraph, options.projectRoot),
+    domainGraph: loadedDomainGraph
+      ? sanitiseKnowledgeGraphFilePaths(loadedDomainGraph, options.projectRoot)
+      : undefined,
+  };
+}
+
+function refreshProductShardedManifest(projectRoot: string): string {
+  const understandDir = join(projectRoot, ".understand-anything");
+  const manifest = buildProductShardedManifest({
+    productShardFiles: listJsonFileNames(join(understandDir, "product-shards")),
+    domainShardFiles: listJsonFileNames(join(understandDir, "domain-shards")),
+    traceFiles: listJsonFileNames(join(understandDir, "product-traces")),
+  });
+  const productIndexPath = getProductIndexPath(projectRoot);
+  writeJson(productIndexPath, manifest);
+  return productIndexPath;
 }
 
 function writeProductIndexTrace(
   projectRoot: string,
+  shardId: string | undefined,
   trace: unknown,
 ): string {
-  const tracePath = join(
-    projectRoot,
-    ".understand-anything",
-    "product-index-trace.json",
-  );
+  const tracePath = getProductTracePath(projectRoot, shardId);
   writeJson(tracePath, trace);
   return tracePath;
 }
@@ -301,6 +383,16 @@ function listJsonFiles(dir: string): string[] {
     .map((name) => join(dir, name));
 }
 
+function listJsonFileNames(dir: string): string[] {
+  if (!existsSync(dir)) {
+    return [];
+  }
+
+  return readdirSync(dir)
+    .filter((name) => name.endsWith(".json"))
+    .sort((a, b) => a.localeCompare(b));
+}
+
 function topicFileName(topicId: string): string {
   return topicId.replace(/[^a-zA-Z0-9._-]+/gu, "_");
 }
@@ -338,6 +430,7 @@ function writeProductSignalsSidecar(
   signalsPath: string,
   signals: ProductSignal[],
 ): void {
+  mkdirSync(dirname(signalsPath), { recursive: true });
   writeFileSync(
     signalsPath,
     signals.map((signal) => JSON.stringify(signal)).join("\n") +
@@ -347,6 +440,7 @@ function writeProductSignalsSidecar(
 }
 
 function writeJson(path: string, value: unknown): void {
+  mkdirSync(dirname(path), { recursive: true });
   writeFileSync(path, JSON.stringify(value, null, 2), "utf-8");
 }
 
@@ -363,14 +457,63 @@ function readJsonFile<T>(path: string, missingMessage: string): T {
   }
 }
 
-function getProductIndexPath(projectRoot: string): string {
+function getProductIndexPath(projectRoot: string, shardId?: string): string {
+  if (shardId) {
+    return join(
+      projectRoot,
+      ".understand-anything",
+      "product-shards",
+      `${shardId}.json`,
+    );
+  }
+
   return join(projectRoot, ".understand-anything", "product-index.json");
+}
+
+function getProductTracePath(projectRoot: string, shardId?: string): string {
+  if (shardId) {
+    return join(
+      projectRoot,
+      ".understand-anything",
+      "product-traces",
+      `${shardId}.json`,
+    );
+  }
+
+  return join(projectRoot, ".understand-anything", "product-index-trace.json");
+}
+
+function getProductSignalsPath(projectRoot: string, shardId?: string): string {
+  if (shardId) {
+    return join(
+      getIntermediateDir(projectRoot, shardId),
+      "product-signals.jsonl",
+    );
+  }
+
+  return join(projectRoot, ".understand-anything", "product-signals.jsonl");
+}
+
+function getIntermediateDir(projectRoot: string, shardId?: string): string {
+  if (shardId) {
+    return join(
+      projectRoot,
+      ".understand-anything",
+      "intermediate",
+      "product-shards",
+      shardId,
+    );
+  }
+
+  return join(projectRoot, ".understand-anything", "intermediate");
 }
 
 interface ParsedArgs {
   projectRoot: string;
   platform: string;
-  stage: "prepare-candidates" | "build-context-packs" | "finalize";
+  stage?: "prepare-candidates" | "build-context-packs" | "finalize";
+  shardId?: string;
+  refreshShards: boolean;
   entryPatterns?: string[];
   maxDepth: number;
   maxNodesPerTopic: number;
@@ -387,6 +530,7 @@ const VALUE_FLAGS = new Set([
   "--max-frontier-per-depth",
   "--max-evidence-per-topic",
   "--hub-degree-threshold",
+  "--shard",
 ]);
 
 const BOOLEAN_FLAGS = new Set([
@@ -394,6 +538,7 @@ const BOOLEAN_FLAGS = new Set([
   "--prepare-candidates",
   "--build-context-packs",
   "--finalize",
+  "--refresh-shards",
 ]);
 const NUMERIC_FLAGS = new Set([
   "--max-depth",
@@ -448,6 +593,11 @@ function parseArgs(argv: string[]): ParsedArgs {
     throw new Error("Choose only one of --prepare-candidates, --build-context-packs, or --finalize.");
   }
 
+  const refreshShards = booleans.has("--refresh-shards");
+  if (refreshShards && selectedModes > 0) {
+    throw new Error("--refresh-shards cannot be combined with a product-index stage.");
+  }
+
   const maxDepth = getNumberFlagValue(values, "--max-depth", 8);
   const maxNodesPerTopic = getNumberFlagValue(values, "--max-nodes-per-topic", 240);
   const maxFrontierPerDepth = getNumberFlagValue(
@@ -466,16 +616,19 @@ function parseArgs(argv: string[]): ParsedArgs {
     80,
   );
   const stage = parseStage(booleans);
-  if (!stage) {
+  if (!refreshShards && !stage) {
     throw new Error(
       "Please run through /understand-product or specify one stage: --prepare-candidates | --build-context-packs | --finalize",
     );
   }
+  const rawShardId = values.get("--shard");
 
   return {
     projectRoot,
     platform: values.get("--platform") ?? "android",
     stage,
+    shardId: rawShardId ? validateShardId(rawShardId) : undefined,
+    refreshShards,
     entryPatterns: entryPatternsValue
       ? entryPatternsValue
           .split(",")
