@@ -276,6 +276,7 @@ export default defineConfig({
       "@understand-anything/core/search": path.resolve(__dirname, "../core/dist/search.js"),
       "@understand-anything/core/types": path.resolve(__dirname, "../core/dist/types.js"),
       "@understand-anything/core/product-index": path.resolve(__dirname, "../core/dist/product-index.js"),
+      "@understand-anything/core/sharded-manifest": path.resolve(__dirname, "../core/dist/sharded-manifest.js"),
     },
   },
 

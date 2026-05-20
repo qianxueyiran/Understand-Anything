@@ -25,6 +25,10 @@
       "types": "./dist/product-index.d.ts",
       "default": "./dist/product-index.js"
     },
+    "./sharded-manifest": {
+      "types": "./dist/sharded-manifest.d.ts",
+      "default": "./dist/sharded-manifest.js"
+    },
     "./languages": {
       "types": "./dist/languages/index.d.ts",
       "default": "./dist/languages/index.js"
