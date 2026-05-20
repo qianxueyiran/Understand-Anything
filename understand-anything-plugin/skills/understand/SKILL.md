@@ -118,7 +118,7 @@ Determine whether to run a full analysis or incremental update.
     - If `--no-auto-update` is in `$ARGUMENTS`: write `{"autoUpdate": false}` to `$PROJECT_ROOT/.understand-anything/config.json`
     - These flags only set the config — analysis proceeds normally regardless.
 
- 3.6. **Language configuration:**
+3.6. **Language configuration:**
     - Parse `$ARGUMENTS` for `--language <lang>` flag. If found, extract the language code.
     - **Language code normalization:** Map friendly names to ISO codes:
       - `chinese` → `zh`, `japanese` → `ja`, `korean` → `ko`, `english` → `en`, `spanish` → `es`, `french` → `fr`, `german` → `de`, `portuguese` → `pt`, `russian` → `ru`, `arabic` → `ar`, etc.
@@ -145,9 +145,9 @@ Determine whether to run a full analysis or incremental update.
       - Reject any scope whose resolved path is outside `$PROJECT_ROOT`.
       - Validate `$SHARD_ID` with `^[A-Za-z0-9_-]+$`; if it fails, report an error and **STOP**.
       - Set `SCOPED_SHARD_MODE=true`, `SHARD_ID=<id>`, `SCOPE_PATHS=<trimmed comma-separated project-relative paths>`, and `SCOPE_ROOTS=<absolute resolved scope roots>`.
-      - Scoped shard mode runs the normal analysis phases, but restricts scanning to the configured scope roots and saves to the shard output path in Phase 7.
+      - Scoped shard mode runs scoped full analysis, restricts scanning to the configured scope roots, and saves to the shard output path in Phase 7.
 
- 4. **Check for subdomain knowledge graphs to merge:**
+4. **Check for subdomain knowledge graphs to merge:**
    List all `*knowledge-graph*.json` files in `$PROJECT_ROOT/.understand-anything/` **excluding** `knowledge-graph.json` itself (e.g. `frontend-knowledge-graph.json`, `backend-knowledge-graph.json`). If any subdomain graphs exist, run the merge script bundled with this skill (located next to this SKILL.md file — use the skill directory path, not the project root):
    ```bash
    python <SKILL_DIR>/merge-subdomain-graphs.py $PROJECT_ROOT
@@ -160,11 +160,14 @@ Determine whether to run a full analysis or incremental update.
 
    | Condition | Action |
    |---|---|
+   | `SCOPED_SHARD_MODE=true` | Always run scoped full analysis for the requested scope roots. Ignore existing main `knowledge-graph.json` / `meta.json` state for unchanged, incremental, and review-only decisions. `--review` does not change this scoped shard rebuild decision; it only controls whether Phase 6 uses the LLM reviewer. |
    | `--full` flag in `$ARGUMENTS` | Full analysis (all phases) |
    | No existing graph or meta | Full analysis (all phases) |
    | `--review` flag + existing graph + unchanged commit hash | Skip to Phase 6 (review-only — reuse existing assembled graph) |
    | Existing graph + unchanged commit hash | Ask the user: "The graph is up to date at this commit. Would you like to: **(a)** run a full rebuild (`--full`), **(b)** run the LLM graph reviewer (`--review`), or **(c)** do nothing?" Then follow their choice. If they pick (c), STOP. |
    | Existing graph + changed files | Incremental update (re-analyze changed files only) |
+
+   The review-only and incremental paths below apply only when `SCOPED_SHARD_MODE=false`.
 
    **Review-only path:** Copy the existing `knowledge-graph.json` to `$PROJECT_ROOT/.understand-anything/intermediate/assembled-graph.json`, then jump directly to Phase 6 step 3.
 
@@ -227,7 +230,7 @@ Set up and verify the `.understandignore` file before scanning.
 
 ---
 
-## Phase 1 — SCAN (Full analysis only)
+## Phase 1 — SCAN (Full rebuild and scoped shard only)
 
 Dispatch a subagent using the `project-scanner` agent definition (at `agents/project-scanner.md`). Append the following additional context:
 
@@ -579,7 +582,9 @@ In scoped shard mode, add top-level shard metadata before saving:
 {
   "shard": {
     "id": "<SHARD_ID>",
-    "scopes": ["<SCOPE_PATHS entries>"]
+    "scopes": ["<SCOPE_PATHS entries>"],
+    "updatedAt": "<ISO 8601 timestamp>",
+    "gitCommitHash": "<commit hash from Phase 0>"
   }
 }
 ```
@@ -733,17 +738,21 @@ Pass these parameters in the dispatch prompt:
      python <SKILL_DIR>/refresh-sharded-manifest.py $PROJECT_ROOT
      ```
 
-2. Write metadata to `$PROJECT_ROOT/.understand-anything/meta.json`:
-   ```json
-   {
-     "lastAnalyzedAt": "<ISO 8601 timestamp>",
-     "gitCommitHash": "<commit hash>",
-     "version": "1.0.0",
-     "analyzedFiles": <number of files analyzed>
-   }
-   ```
+2. **Metadata persistence:**
+   - Full mode: write metadata to `$PROJECT_ROOT/.understand-anything/meta.json`:
+     ```json
+     {
+       "lastAnalyzedAt": "<ISO 8601 timestamp>",
+       "gitCommitHash": "<commit hash>",
+       "version": "1.0.0",
+       "analyzedFiles": <number of files analyzed>
+     }
+     ```
+   - Scoped shard mode: does not write global `$PROJECT_ROOT/.understand-anything/meta.json`. The shard's `scopes`, `updatedAt`, and `gitCommitHash` are recorded in top-level `shard` metadata in `$PROJECT_ROOT/.understand-anything/shards/$SHARD_ID.json` and in the root manifest generated by `refresh-sharded-manifest.py`.
 
-2.5. **Generate structural fingerprints** for all analyzed files and save to `$PROJECT_ROOT/.understand-anything/fingerprints.json`. This creates the baseline for future automatic incremental updates.
+3. **Generate structural fingerprints**:
+   - Full mode: generate structural fingerprints for all analyzed files and save to `$PROJECT_ROOT/.understand-anything/fingerprints.json`. This creates the baseline for future automatic incremental updates.
+   - Scoped shard mode: does not write global `$PROJECT_ROOT/.understand-anything/fingerprints.json` and does not update the global automatic incremental-update baseline.
 
    Write and execute a Node.js script that uses the core fingerprint module (tree-sitter-based, not regex):
    ```javascript
@@ -753,15 +762,15 @@ Pass these parameters in the dispatch prompt:
    const store = await buildFingerprintStore('<PROJECT_ROOT>', sourceFilePaths);
    saveFingerprints('<PROJECT_ROOT>', store);
    ```
-   Where `sourceFilePaths` is the list of all analyzed source file paths from Phase 1. This uses the same tree-sitter analysis pipeline as the main fingerprint engine, ensuring the baseline matches the comparison logic used during auto-updates.
+   Where `sourceFilePaths` is the list of all analyzed source file paths from Phase 1. This uses the same tree-sitter analysis pipeline as the main fingerprint engine, ensuring the baseline matches the comparison logic used during auto-updates. Skip this script in scoped shard mode.
 
-3. Clean up intermediate files:
+4. Clean up intermediate files:
    ```bash
    rm -rf $PROJECT_ROOT/.understand-anything/intermediate
    rm -rf $PROJECT_ROOT/.understand-anything/tmp
    ```
 
-4. Report a summary to the user containing:
+5. Report a summary to the user containing:
    - Project name and description
    - Files analyzed / total files (with breakdown by fileCategory: code, config, docs, infra, data, script, markup)
    - Nodes created (broken down by type: file, function, class, config, document, service, table, endpoint, pipeline, schema, resource)
@@ -771,8 +780,10 @@ Pass these parameters in the dispatch prompt:
    - Any warnings from the reviewer
    - Path to the output file (`$PROJECT_ROOT/.understand-anything/knowledge-graph.json` in full mode, or `$PROJECT_ROOT/.understand-anything/shards/$SHARD_ID.json` in scoped shard mode)
 
-5. Only automatically launch the dashboard by invoking the `/understand-dashboard` skill if final graph validation passed after normalization/review fixes.
-   If final validation did not pass, report that the graph was saved with warnings and dashboard launch was skipped.
+6. Dashboard launch:
+   - Full mode: automatically launch the dashboard by invoking the `/understand-dashboard` skill if final graph validation passed after normalization/review fixes.
+   - Scoped shard mode: do not automatically launch `/understand-dashboard`; report the shard output path and manifest refresh result instead.
+   - If final validation did not pass, report that the graph was saved with warnings and dashboard launch was skipped.
 
 ---
 
