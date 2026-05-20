@@ -252,11 +252,12 @@ function loadProductGraphInputs(
   graph: KnowledgeGraph;
   domainGraph?: KnowledgeGraph;
 } {
+  const rootGraph = readJsonFile<unknown>(
+    graphPath,
+    "knowledge-graph.json not found. 请先运行 /understand。",
+  );
+
   if (options.shardId) {
-    const rootGraph = readJsonFile<unknown>(
-      graphPath,
-      "knowledge-graph.json not found. 请先运行 /understand。",
-    );
     if (getTopLevelKind(rootGraph) !== "codebase-sharded") {
       throw new Error("当前项目不是 sharded code graph。");
     }
@@ -296,6 +297,12 @@ function loadProductGraphInputs(
         ? sanitiseKnowledgeGraphFilePaths(rawDomainGraph, options.projectRoot)
         : undefined,
     };
+  }
+
+  if (getTopLevelKind(rootGraph) === "codebase-sharded") {
+    throw new Error(
+      "当前项目是 sharded code graph。请使用 --shard <id> 处理单个 shard，或使用 --refresh-shards 刷新 product-index.json manifest。",
+    );
   }
 
   const loadedGraph = loadGraph(options.projectRoot);
@@ -486,8 +493,10 @@ function getProductTracePath(projectRoot: string, shardId?: string): string {
 function getProductSignalsPath(projectRoot: string, shardId?: string): string {
   if (shardId) {
     return join(
-      getIntermediateDir(projectRoot, shardId),
-      "product-signals.jsonl",
+      projectRoot,
+      ".understand-anything",
+      "product-shards",
+      `${shardId}.signals.jsonl`,
     );
   }
 

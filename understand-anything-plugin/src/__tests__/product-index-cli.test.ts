@@ -7,7 +7,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import type { KnowledgeGraph } from "@understand-anything/core";
 import { runProductIndexCli } from "../product-index-cli.js";
 
@@ -56,7 +56,23 @@ function writeRootGraph(value: unknown): void {
 }
 
 function writeJson(path: string, value: unknown): void {
+  mkdirSync(dirname(path), { recursive: true });
   writeFileSync(path, JSON.stringify(value, null, 2), "utf-8");
+}
+
+function writeShardedRoot(shardId = "home"): void {
+  writeRootGraph({
+    version: "1.0.0",
+    kind: "codebase-sharded",
+    shards: [{ id: shardId, path: `shards/${shardId}.json` }],
+  });
+}
+
+function writeCodeShard(shardId: string, nextGraph: KnowledgeGraph = graph): void {
+  writeJson(
+    join(testRoot, ".understand-anything", "shards", `${shardId}.json`),
+    nextGraph,
+  );
 }
 
 function readSignals(): Array<{ filePath?: string; nodeId: string }> {
@@ -116,15 +132,8 @@ describe("product-index CLI", () => {
   });
 
   it("prepares candidates for a product shard without writing the root product index", async () => {
-    writeRootGraph({
-      version: "1.0.0",
-      kind: "codebase-sharded",
-      shards: [{ id: "home", path: "shards/home.json" }],
-    });
-    mkdirSync(join(testRoot, ".understand-anything", "shards"), {
-      recursive: true,
-    });
-    writeJson(join(testRoot, ".understand-anything", "shards", "home.json"), graph);
+    writeShardedRoot();
+    writeCodeShard("home");
 
     const result = await runProductIndexCli([
       testRoot,
@@ -150,9 +159,42 @@ describe("product-index CLI", () => {
         ),
       ),
     ).toBe(true);
+    expect(result.productSignalsPath?.endsWith("product-shards/home.signals.jsonl")).toBe(
+      true,
+    );
+    expect(
+      existsSync(
+        join(testRoot, ".understand-anything", "product-shards", "home.signals.jsonl"),
+      ),
+    ).toBe(true);
+    expect(
+      existsSync(
+        join(
+          testRoot,
+          ".understand-anything",
+          "intermediate",
+          "product-shards",
+          "home",
+          "product-signals.jsonl",
+        ),
+      ),
+    ).toBe(false);
     expect(
       existsSync(join(testRoot, ".understand-anything", "product-index.json")),
     ).toBe(false);
+  });
+
+  it("rejects sharded roots without shard or refresh mode", async () => {
+    writeShardedRoot();
+
+    await expect(
+      runProductIndexCli([
+        testRoot,
+        "--platform",
+        "android",
+        "--prepare-candidates",
+      ]),
+    ).rejects.toThrow(/--shard <id>.*--refresh-shards/s);
   });
 
   it("rejects unsafe shard ids", async () => {
@@ -183,6 +225,11 @@ describe("product-index CLI", () => {
       "{not json",
       "utf-8",
     );
+    writeFileSync(
+      join(testRoot, ".understand-anything", "product-shards", "player.json"),
+      "{also not json",
+      "utf-8",
+    );
     writeJson(
       join(testRoot, ".understand-anything", "product-traces", "home.json"),
       { trace: true },
@@ -208,6 +255,7 @@ describe("product-index CLI", () => {
         sourceCodeShard: string;
         sourceDomainShard?: string;
       }>;
+      warnings: string[];
     };
     expect(productIndex.kind).toBe("product-sharded");
     expect(productIndex.shards).toEqual([
@@ -218,10 +266,139 @@ describe("product-index CLI", () => {
         sourceCodeShard: "shards/home.json",
         sourceDomainShard: "domain-shards/home.json",
       },
+      {
+        id: "player",
+        path: "product-shards/player.json",
+        sourceCodeShard: "shards/player.json",
+      },
     ]);
-    expect(JSON.stringify(productIndex)).not.toMatch(
-      /topicCount|factCount|evidenceCount/,
+    expect(productIndex.warnings).toContain(
+      "product-shards/player.json has no matching product-traces/player.json",
     );
+    expect(JSON.stringify(productIndex)).not.toMatch(
+      /topicCount|factCount|evidenceCount|signalsCount|contextPacksCount|coverage|quality/,
+    );
+  });
+
+  it("finalizes a product shard without writing root product outputs", async () => {
+    writeShardedRoot();
+    writeCodeShard("home", {
+      ...graph,
+      nodes: [
+        {
+          ...graph.nodes[0],
+          businessSignals: [{ type: "behavior", text: "播放页提供投屏入口" }],
+        },
+      ],
+    });
+    await runProductIndexCli([
+      testRoot,
+      "--platform",
+      "android",
+      "--prepare-candidates",
+      "--shard",
+      "home",
+    ]);
+
+    const intermediateDir = join(
+      testRoot,
+      ".understand-anything",
+      "intermediate",
+      "product-shards",
+      "home",
+    );
+    const candidates = JSON.parse(
+      readFileSync(
+        join(intermediateDir, "product-boundary-candidates.json"),
+        "utf-8",
+      ),
+    );
+    writeJson(join(intermediateDir, "product-topic-normalization.json"), {
+      topics: [
+        {
+          id: "topic:player",
+          name: "播放页",
+          summary: "播放页包含投屏入口。",
+          kind: "capability",
+          sourceCandidateIds: [candidates[0].id],
+          rootNodeIds: [candidates[0].rootNodeId],
+          domainRefs: [],
+          confidence: "confirmed",
+        },
+      ],
+      discardedCandidates: [],
+      sourceReads: [],
+      warnings: [],
+    });
+
+    await runProductIndexCli([
+      testRoot,
+      "--platform",
+      "android",
+      "--build-context-packs",
+      "--shard",
+      "home",
+    ]);
+    const packs = JSON.parse(
+      readFileSync(join(intermediateDir, "product-context-packs.json"), "utf-8"),
+    );
+    writeJson(
+      join(
+        intermediateDir,
+        "product-index-extractions-by-topic",
+        "topic_player.json",
+      ),
+      {
+        topicId: packs[0].topic.id,
+        sourceReads: [
+          {
+            fileId: packs[0].candidateFiles[0].fileId,
+            filePath: packs[0].candidateFiles[0].filePath,
+            reason: "确认播放页入口。",
+          },
+        ],
+        usedFiles: [
+          {
+            fileId: packs[0].candidateFiles[0].fileId,
+            reason: "承载播放页能力",
+          },
+        ],
+        ignoredFiles: [],
+        facts: [
+          {
+            type: "behavior",
+            text: "播放页提供投屏入口。",
+            conditions: ["用户打开播放页"],
+            evidenceRefs: [packs[0].candidateFiles[0].anchors[0].anchorId],
+            confidence: "confirmed",
+          },
+        ],
+      },
+    );
+
+    const result = await runProductIndexCli([
+      testRoot,
+      "--platform",
+      "android",
+      "--finalize",
+      "--shard",
+      "home",
+    ]);
+
+    expect(result.productIndexPath.endsWith("product-shards/home.json")).toBe(true);
+    expect(result.tracePath?.endsWith("product-traces/home.json")).toBe(true);
+    expect(
+      existsSync(join(testRoot, ".understand-anything", "product-shards", "home.json")),
+    ).toBe(true);
+    expect(
+      existsSync(join(testRoot, ".understand-anything", "product-traces", "home.json")),
+    ).toBe(true);
+    expect(
+      existsSync(join(testRoot, ".understand-anything", "product-index.json")),
+    ).toBe(false);
+    expect(
+      existsSync(join(testRoot, ".understand-anything", "product-index-trace.json")),
+    ).toBe(false);
   });
 
   it("throws a clear error when knowledge graph is missing", async () => {
