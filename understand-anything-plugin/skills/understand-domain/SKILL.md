@@ -93,17 +93,20 @@ Use `$PLUGIN_ROOT` for every reference to agent definitions in subsequent phases
 - `--shard <id>`：只从 `$PROJECT_ROOT/.understand-anything/shards/<id>.json` 派生一个 domain shard。
 - `--refresh-shards`：只运行 `python "$PLUGIN_ROOT/skills/understand-domain/refresh-domain-sharded-manifest.py" "$PROJECT_ROOT"` 后停止；不要运行 LLM，也不要读取任何 shard 内容。
 - shard id 必须匹配 `^[A-Za-z0-9_-]+$`；不匹配时停止并提示用户传入合法 id。
-- 分片模式读取 `knowledge-graph.json` 时，先 raw JSON 读取并检查顶层 `kind`，不要先按完整 `KnowledgeGraph` 解析。
+- 分片模式读取 `knowledge-graph.json` 时，先 raw JSON 读取并检查顶层 `kind`，不要先按完整 `KnowledgeGraph` 解析；`--shard <id>` 只有在顶层 `kind` 是 `codebase-sharded` 时才能继续，否则停止并提示“当前项目不是 sharded code graph”。
+- `--shard <id>` 必须检查 `$PROJECT_ROOT/.understand-anything/shards/$SHARD_ID.json` 存在；不存在时停止并提示先运行 `/understand --scope ... --shard <id>`。
 
 ### Phase 1: Detect Existing Graph
 
 1. Check if `$PROJECT_ROOT/.understand-anything/knowledge-graph.json` exists
 2. If `--refresh-shards` was passed → run `python "$PLUGIN_ROOT/skills/understand-domain/refresh-domain-sharded-manifest.py" "$PROJECT_ROOT"` and stop
 3. If it exists, raw JSON read only the top-level `kind` before any full graph parsing
-4. If root kind is `codebase-sharded` and neither `--shard` nor `--refresh-shards` was passed → tell the user to rerun with `--shard <id>` or `--refresh-shards`; do not load all shards
-5. If `--shard <id>` was passed → proceed to Phase 3 using only `$PROJECT_ROOT/.understand-anything/shards/$SHARD_ID.json`
-6. If it exists AND `--full` was NOT passed → proceed to Phase 3 (derive from graph)
-7. Otherwise → proceed to Phase 2 (lightweight scan)
+4. If `--shard <id>` was passed and root kind is not `codebase-sharded` → stop and tell the user “当前项目不是 sharded code graph”
+5. If `--shard <id>` was passed and `$PROJECT_ROOT/.understand-anything/shards/$SHARD_ID.json` does not exist → stop and tell the user to run `/understand --scope ... --shard <id>` first
+6. If root kind is `codebase-sharded` and neither `--shard` nor `--refresh-shards` was passed → tell the user to rerun with `--shard <id>` or `--refresh-shards`; do not load all shards
+7. If `--shard <id>` was passed → proceed to Phase 3 using only `$PROJECT_ROOT/.understand-anything/shards/$SHARD_ID.json`
+8. If it exists AND `--full` was NOT passed → proceed to Phase 3 (derive from graph)
+9. Otherwise → proceed to Phase 2 (lightweight scan)
 
 ### Phase 2: Lightweight Scan (Path 1)
 
