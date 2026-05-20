@@ -253,7 +253,7 @@ When a file, class, function, method, endpoint, service, receiver, route, task, 
 Signal schema:
 
 ```json
-{"type": "entry|behavior|rule|display|data|integration", "text": "short product phrase"}
+{"type": "entry|behavior|rule|display|data|integration", "text": "product phrase"}
 ```
 
 Rules:
@@ -265,16 +265,16 @@ Rules:
 - Each function/method node may have at most 1 signal.
 - Each class node may have at most 3 signals.
 - Each file node may have at most 8 signals.
-- `text` must be a short product phrase, not a sentence-length code explanation.
+- `text` must be product phrase, not code explanation. **Focused on ”WHO DO WHAT“, not "HOW"**
 - Do not emit signals for ViewBinding initialization, inheritance, dependency injection, logging, generic utilities, observer registration, or base framework boilerplate.
 
 Examples:
 
 ```json
-{"type": "entry", "text": "开机广播接收入口"}
-{"type": "display", "text": "首页退出确认弹窗"}
-{"type": "data", "text": "播放记录后台同步"}
-{"type": "integration", "text": "投屏设备发现与连接"}
+{"type": "entry", "text": "开机广播接收入口，负责接收启动消息"}
+{"type": "display", "text": "展示首页退出确认弹窗，供用户选择退出还是继续使用"}
+{"type": "data", "text": "从后台获取播放记录数据，展示到前端"}
+{"type": "integration", "text": "建立投屏设备的连接"}
 ```
 
 ### Step 3 -- Create Edges

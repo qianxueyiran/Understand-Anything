@@ -1,9 +1,12 @@
 import type { GraphEdge, GraphNode, KnowledgeGraph } from "./types.js";
+import type { FrameworkConfig, LanguageConfig } from "./languages/index.js";
+import { FrameworkRegistry, LanguageRegistry } from "./languages/index.js";
 import type {
   ProductEvidence,
   ProductEvidenceRole,
   ProductFact,
   ProductIndex,
+  ProductCoverageWarning,
   ProductSignal,
   ProductSignalType,
   ProductTopic,
@@ -87,9 +90,11 @@ export interface ProductExtractionFact {
 
 export interface ProductTopicExtraction {
   topicId: string;
+  sourceReads?: Array<{ fileId?: string; filePath: string; reason: string }>;
   usedFiles: Array<{ fileId: string; reason: string }>;
   ignoredFiles: Array<{ fileId: string; reason: string }>;
   facts: ProductExtractionFact[];
+  warnings?: Array<{ code: string; message: string }>;
 }
 
 export interface FinalizeGroundedProductIndexInput {
@@ -98,10 +103,12 @@ export interface FinalizeGroundedProductIndexInput {
   contextPacks: TopicContextPack[];
   extractions: ProductTopicExtraction[];
   options: ProductProfileOptions;
+  validationWarnings?: ProductCoverageWarning[];
 }
 
 export interface ProductBoundaryCandidateOptions {
   entryPatterns?: string[];
+  platform?: string;
   maxNeighborNodeIds?: number;
 }
 
@@ -128,6 +135,11 @@ interface ScoredCandidate {
   productScore: number;
   topicTokenScore: number;
 }
+
+type ProductEntryPatternOptions = {
+  entryPatterns?: string[];
+  platform?: string;
+};
 
 const DEFAULT_ENTRY_PATTERNS = [
   /Activity$/i,
@@ -289,7 +301,7 @@ export function enumerateProductEntrySeeds(
   graph: KnowledgeGraph,
   options: ProductProfileOptions,
 ): ProductEntrySeed[] {
-  const patterns = compileEntryPatterns(options.entryPatterns);
+  const patterns = compileEntryPatterns(graph, options);
 
   return graph.nodes
     .filter((node) => isEntryCandidate(node, patterns))
@@ -352,7 +364,7 @@ export function buildProductBoundaryCandidates(
   domainGraph?: KnowledgeGraph,
   options: ProductBoundaryCandidateOptions = {},
 ): ProductBoundaryCandidate[] {
-  const patterns = compileEntryPatterns(options.entryPatterns);
+  const patterns = compileEntryPatterns(graph, options);
   const adjacency = buildAdjacency(graph.edges);
   const maxNeighbors = options.maxNeighborNodeIds ?? DEFAULT_MAX_BOUNDARY_NEIGHBORS;
 
@@ -468,7 +480,7 @@ export function finalizeGroundedProductIndex(input: FinalizeGroundedProductIndex
   const evidenceById = new Map<string, ProductEvidence>();
   const facts: ProductFact[] = [];
   const outputTopics: ProductTopic[] = [];
-  const warnings: ProductIndex["coverage"]["warnings"] = [];
+  const warnings: ProductIndex["coverage"]["warnings"] = [...(input.validationWarnings ?? [])];
 
   for (const topic of inputTopics) {
     const pack = packByTopicId.get(topic.id);
@@ -483,14 +495,31 @@ export function finalizeGroundedProductIndex(input: FinalizeGroundedProductIndex
     const entryEvidenceIds: string[] = [];
 
     extraction.facts.forEach((extractionFact, factIndex) => {
-      const anchors = uniqueStrings(extractionFact.evidenceRefs)
-        .map((evidenceRef) => anchorById.get(evidenceRef))
-        .filter((anchor): anchor is ProductContextAnchor => anchor !== undefined)
-        .slice(0, 3);
+      const anchors: ProductContextAnchor[] = [];
+      for (const evidenceRef of uniqueStrings(extractionFact.evidenceRefs)) {
+        const anchor = anchorById.get(evidenceRef);
+        if (!anchor) {
+          warnings.push({
+            code: "invalid-evidence-ref",
+            severity: "warning",
+            stage: "finalize",
+            message: `Dropped invalid evidence ref ${evidenceRef}.`,
+            topicId: topic.id,
+            evidenceRef,
+          });
+          continue;
+        }
+        anchors.push(anchor);
+        if (anchors.length >= 3) {
+          break;
+        }
+      }
 
       if (anchors.length === 0) {
         warnings.push({
           code: "fact-without-evidence",
+          severity: "warning",
+          stage: "finalize",
           message: `Dropped fact for ${topic.id} because it did not reference valid evidence anchors.`,
           topicId: topic.id,
         });
@@ -532,6 +561,13 @@ export function finalizeGroundedProductIndex(input: FinalizeGroundedProductIndex
     });
 
     if (factIds.length === 0) {
+      warnings.push({
+        code: "topic-without-facts",
+        severity: "warning",
+        stage: "finalize",
+        message: `Dropped topic ${topic.id} because it had no facts with valid evidence.`,
+        topicId: topic.id,
+      });
       continue;
     }
 
@@ -716,12 +752,84 @@ export function buildDeterministicProductIndex(
   };
 }
 
-function compileEntryPatterns(patterns?: string[]): RegExp[] {
-  if (!patterns || patterns.length === 0) {
+function compileEntryPatterns(
+  graph: KnowledgeGraph,
+  options: ProductEntryPatternOptions = {},
+): RegExp[] {
+  const patterns = resolveProductEntryPatterns(graph, options);
+  if (patterns.length === 0) {
     return DEFAULT_ENTRY_PATTERNS;
   }
 
   return patterns.map((pattern) => globPatternToRegex(pattern));
+}
+
+function resolveProductEntryPatterns(
+  graph: KnowledgeGraph,
+  options: ProductEntryPatternOptions,
+): string[] {
+  if (options.entryPatterns && options.entryPatterns.length > 0) {
+    return uniqueStrings(options.entryPatterns.filter(isString));
+  }
+
+  const languageRegistry = LanguageRegistry.createDefault();
+  const frameworkRegistry = FrameworkRegistry.createDefault();
+  const languages = uniqueStrings(graph.project.languages ?? []);
+  const frameworks = uniqueStrings([
+    ...(graph.project.frameworks ?? []),
+    ...(options.platform ? [options.platform] : []),
+  ]);
+  const patterns: string[] = [];
+
+  for (const languageId of languages) {
+    const config = findLanguageConfig(languageRegistry, languageId);
+    if (config) {
+      patterns.push(...config.filePatterns.entryPoints);
+    }
+  }
+
+  for (const frameworkId of frameworks) {
+    const config = findFrameworkConfig(frameworkRegistry, frameworkId);
+    if (config?.entryPoints) {
+      patterns.push(...config.entryPoints);
+    }
+  }
+
+  return uniqueStrings(patterns.filter(isString));
+}
+
+function findLanguageConfig(registry: LanguageRegistry, rawId: string): LanguageConfig | null {
+  const normalized = normalizeProfileId(rawId);
+  return (
+    registry.getById(normalized) ??
+    registry.getAllLanguages().find(
+      (config) =>
+        normalizeProfileId(config.id) === normalized ||
+        normalizeProfileId(config.displayName) === normalized,
+    ) ??
+    null
+  );
+}
+
+function findFrameworkConfig(registry: FrameworkRegistry, rawId: string): FrameworkConfig | null {
+  const normalized = normalizeProfileId(rawId);
+  return (
+    registry.getById(normalized) ??
+    registry.getAllFrameworks().find(
+      (config) =>
+        normalizeProfileId(config.id) === normalized ||
+        normalizeProfileId(config.displayName) === normalized,
+    ) ??
+    null
+  );
+}
+
+function normalizeProfileId(value: string): string {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/gu, "-")
+    .replace(/^-+|-+$/gu, "");
 }
 
 function boundaryCandidateRank(candidate: ProductBoundaryCandidate): number {
@@ -910,6 +1018,9 @@ function buildNameCandidates(node: GraphNode): string[] {
 
 function inferEntryKind(node: GraphNode): string {
   const text = `${node.name} ${node.filePath ?? ""}`.toLowerCase();
+  if (text.includes("activityproxy") || text.includes("activity-proxy")) {
+    return "activity-proxy";
+  }
   if (text.includes("activity")) {
     return "activity";
   }
@@ -925,8 +1036,23 @@ function inferEntryKind(node: GraphNode): string {
   if (text.includes("receiver")) {
     return "receiver";
   }
+  if (text.includes("contentprovider") || text.includes("content-provider")) {
+    return "provider";
+  }
+  if (text.includes("presenter")) {
+    return "presenter";
+  }
+  if (text.includes("startup")) {
+    return "startup";
+  }
+  if (text.includes("boot")) {
+    return "boot";
+  }
   if (text.includes("worker")) {
     return "worker";
+  }
+  if (text.includes("task")) {
+    return "task";
   }
   if (text.includes("job")) {
     return "job";

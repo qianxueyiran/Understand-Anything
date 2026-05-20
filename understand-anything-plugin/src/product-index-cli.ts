@@ -1,4 +1,11 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { isAbsolute, relative, resolve, join } from "node:path";
 import {
   buildProductSignals,
@@ -13,12 +20,16 @@ import {
   buildProductBoundaryCandidates,
   buildTopicContextPacks,
   finalizeGroundedProductIndex,
-  normaliseProductTopics,
   type ProductBoundaryCandidate,
-  type ProductContextAnchor,
-  type ProductTopicExtraction,
   type TopicContextPack,
 } from "../packages/core/dist/product-index-builder.js";
+import {
+  applyTopicNormalization,
+  buildProductIndexTrace,
+  validateProductExtractions,
+  validateTopicNormalization,
+  type ProductPipelineWarning,
+} from "../packages/core/dist/product-index-pipeline.js";
 
 export interface ProductIndexCliResult {
   projectRoot: string;
@@ -89,32 +100,76 @@ export async function runProductIndexCli(
     ".understand-anything",
     "intermediate",
   );
+  const boundaryCandidatesPath = join(
+    intermediateDir,
+    "product-boundary-candidates.json",
+  );
+  const topicNormalizationPath = join(
+    intermediateDir,
+    "product-topic-normalization.json",
+  );
   const contextPacksPath = join(
     intermediateDir,
     "product-context-packs.json",
   );
+  const contextPacksByTopicDir = join(
+    intermediateDir,
+    "product-context-packs-by-topic",
+  );
+  const extractionsPath = join(
+    intermediateDir,
+    "product-index-extractions.json",
+  );
+  const extractionsByTopicDir = join(
+    intermediateDir,
+    "product-index-extractions-by-topic",
+  );
 
-  if (options.prepare) {
-    const { candidates, contextPacks } = prepareGroundedProductContext(
+  if (options.stage === "prepare-candidates") {
+    const candidates = buildProductBoundaryCandidates(
       graph,
       domainGraph,
       builderOptions,
-      signals,
     );
 
     mkdirSync(intermediateDir, { recursive: true });
-    writeJson(
-      join(intermediateDir, "product-boundary-candidates.json"),
-      candidates,
+    writeJson(boundaryCandidatesPath, candidates);
+
+    return {
+      projectRoot: options.projectRoot,
+      productIndexPath: getProductIndexPath(options.projectRoot),
+      productSignalsPath: signalsPath,
+      topics: 0,
+      facts: 0,
+      evidence: 0,
+      signals: businessSignalCount,
+      contextPacks: 0,
+    };
+  }
+
+  if (options.stage === "build-context-packs") {
+    const candidates = readJsonFile<ProductBoundaryCandidate[]>(
+      boundaryCandidatesPath,
+      "product-boundary-candidates.json not found. 请先运行 /understand-product --prepare-candidates。",
     );
+    const normalizationData = readJsonFile<unknown>(
+      topicNormalizationPath,
+      "product-topic-normalization.json not found. LLM topic normalizer did not write normalization output.",
+    );
+    const { normalization } = validateTopicNormalization(normalizationData, candidates, graph);
+    const topics = applyTopicNormalization(normalization, candidates);
+    const contextPacks = buildTopicContextPacks(graph, topics);
+
+    mkdirSync(intermediateDir, { recursive: true });
     writeJson(contextPacksPath, contextPacks);
+    writeTopicContextPackFiles(contextPacksByTopicDir, contextPacks);
 
     return {
       projectRoot: options.projectRoot,
       productIndexPath: getProductIndexPath(options.projectRoot),
       productSignalsPath: signalsPath,
       contextPacksPath,
-      topics: contextPacks.length,
+      topics: topics.length,
       facts: 0,
       evidence: 0,
       signals: businessSignalCount,
@@ -122,35 +177,51 @@ export async function runProductIndexCli(
     };
   }
 
-  if (options.finalize) {
+  if (options.stage === "finalize") {
+    const candidates = readJsonFile<ProductBoundaryCandidate[]>(
+      boundaryCandidatesPath,
+      "product-boundary-candidates.json not found. 请先运行 /understand-product --prepare-candidates。",
+    );
+    const normalizationData = readJsonFile<unknown>(
+      topicNormalizationPath,
+      "product-topic-normalization.json not found. LLM topic normalizer did not write normalization output.",
+    );
     const contextPacks = readJsonFile<TopicContextPack[]>(
       contextPacksPath,
-      "product-context-packs.json not found. 请先运行 /understand-product --prepare。",
+      "product-context-packs.json not found. 请先运行 /understand-product --build-context-packs。",
     );
-    const extractions = readJsonFile<ProductTopicExtraction[]>(
-      join(intermediateDir, "product-index-extractions.json"),
-      "product-index-extractions.json not found. LLM analyzer did not write extraction output.",
+    const extractionsData = readProductExtractions(
+      extractionsByTopicDir,
+      extractionsPath,
     );
-    const topics = contextPacks.map((pack) => pack.topic);
+    writeJson(extractionsPath, extractionsData);
+    const topicValidation = validateTopicNormalization(normalizationData, candidates, graph);
+    const topics = applyTopicNormalization(topicValidation.normalization, candidates);
+    const extractionValidation = validateProductExtractions(extractionsData, contextPacks);
+    const validationWarnings = [
+      ...topicValidation.warnings,
+      ...extractionValidation.warnings,
+    ];
     const index = finalizeGroundedProductIndex({
       graph,
       topics,
       contextPacks,
-      extractions,
+      extractions: extractionValidation.extractions,
       options: builderOptions,
+      validationWarnings,
     });
     saveProductIndex(options.projectRoot, index);
 
-    const tracePath = join(
+    const tracePath = writeProductIndexTrace(
       options.projectRoot,
-      ".understand-anything",
-      "product-index-trace.json",
+      buildProductIndexTrace({
+        boundaryCandidates: candidates,
+        topicNormalization: topicValidation.normalization,
+        contextPacks,
+        extractions: extractionValidation.extractions,
+        warnings: index.coverage.warnings.map(toPipelineWarning),
+      }),
     );
-    writeJson(tracePath, {
-      contextPacks,
-      extractions,
-      warnings: index.coverage.warnings,
-    });
 
     return {
       projectRoot: options.projectRoot,
@@ -166,177 +237,94 @@ export async function runProductIndexCli(
     };
   }
 
-  const { contextPacks } = prepareGroundedProductContext(
-    graph,
-    domainGraph,
-    builderOptions,
-    signals,
+  const exhaustiveStage: never = options.stage;
+  throw new Error(`Unsupported product-index stage: ${exhaustiveStage}`);
+}
+
+function writeProductIndexTrace(
+  projectRoot: string,
+  trace: unknown,
+): string {
+  const tracePath = join(
+    projectRoot,
+    ".understand-anything",
+    "product-index-trace.json",
   );
-  const topics = contextPacks.map((pack) => pack.topic);
-  const extractions = buildFallbackProductExtractions(contextPacks);
-  const index = finalizeGroundedProductIndex({
-    graph,
-    topics,
-    contextPacks,
-    extractions,
-    options: builderOptions,
-  });
-
-  saveProductIndex(options.projectRoot, index);
-
-  return {
-    projectRoot: options.projectRoot,
-    productIndexPath: getProductIndexPath(options.projectRoot),
-    productSignalsPath: signalsPath,
-    topics: index.topics.length,
-    facts: index.facts.length,
-    evidence: index.evidence.length,
-    signals: businessSignalCount,
-    contextPacks: contextPacks.length,
-  };
+  writeJson(tracePath, trace);
+  return tracePath;
 }
 
-function prepareGroundedProductContext(
-  graph: KnowledgeGraph,
-  domainGraph: KnowledgeGraph | undefined,
-  builderOptions: ProductProfileOptions,
-  signals: ProductSignal[],
-) {
-  const boundaryCandidates = buildProductBoundaryCandidates(
-    graph,
-    domainGraph,
-    builderOptions,
-  );
-  const needsFallbackSignals =
-    boundaryCandidates.length === 0 ||
-    boundaryCandidates.every(
-      (candidate) => candidate.businessSignals.length === 0,
-    );
-  const contextGraph = needsFallbackSignals
-    ? addFallbackBusinessSignals(graph, signals)
-    : graph;
-  const candidates =
-    boundaryCandidates.length > 0
-      ? boundaryCandidates
-      : buildFallbackBoundaryCandidates(contextGraph, signals);
-  const topics = normaliseProductTopics(candidates);
-  const contextPacks = buildTopicContextPacks(contextGraph, topics);
-
-  return { candidates, topics, contextPacks };
-}
-
-function addFallbackBusinessSignals(
-  graph: KnowledgeGraph,
-  signals: ProductSignal[],
-): KnowledgeGraph {
-  const signalByNodeId = new Map(signals.map((signal) => [signal.nodeId, signal]));
-
-  return {
-    ...graph,
-    nodes: graph.nodes.map((node) => {
-      if ((node.businessSignals?.length ?? 0) > 0) {
-        return node;
-      }
-
-      const signal = signalByNodeId.get(node.id);
-      const type = normaliseSignalType(signal?.types[0]);
-      if (!signal || !type) {
-        return node;
-      }
-
-      return {
-        ...node,
-        businessSignals: [
-          {
-            type,
-            text: node.summary || node.name,
-          },
-        ],
-      };
-    }),
-  };
-}
-
-function normaliseSignalType(
-  type: string | undefined,
-): "entry" | "behavior" | "rule" | "display" | "data" | "integration" | undefined {
-  if (
-    type === "entry" ||
-    type === "behavior" ||
-    type === "rule" ||
-    type === "display" ||
-    type === "data" ||
-    type === "integration"
-  ) {
-    return type;
-  }
-
-  return undefined;
-}
-
-function buildFallbackBoundaryCandidates(
-  graph: KnowledgeGraph,
-  signals: ProductSignal[],
-): ProductBoundaryCandidate[] {
-  const nodeById = new Map(graph.nodes.map((node) => [node.id, node]));
-
-  return signals.map((signal) => {
-    const node = nodeById.get(signal.nodeId);
-    return {
-      id: `candidate:${signal.nodeId}`,
-      rootNodeId: signal.nodeId,
-      name: signal.symbol || node?.name || signal.nodeId,
-      entryKind: signal.types[0] ?? "entry",
-      ...(signal.filePath ? { filePath: signal.filePath } : {}),
-      businessSignals: node?.businessSignals ?? [],
-      neighborNodeIds: [],
-      domainRefs: [],
-    };
-  });
-}
-
-function buildFallbackProductExtractions(
+function writeTopicContextPackFiles(
+  outputDir: string,
   contextPacks: TopicContextPack[],
-): ProductTopicExtraction[] {
-  return contextPacks.map((pack) => {
-    const anchor = findFirstFileAnchor(pack);
-    return {
-      topicId: pack.topic.id,
-      usedFiles: anchor
-        ? [{ fileId: anchor.file.fileId, reason: "deterministic fallback" }]
-        : [],
-      ignoredFiles: [],
-      facts: anchor
-        ? [
-            {
-              type:
-                anchor.anchor.type === "entry" ? "behavior" : anchor.anchor.type,
-              text: `${pack.topic.name} 包含 ${anchor.anchor.text}。`,
-              conditions: [],
-              evidenceRefs: [anchor.anchor.anchorId],
-              confidence: "inferred",
-            },
-          ]
-        : [],
-    };
-  });
+): void {
+  rmSync(outputDir, { recursive: true, force: true });
+  mkdirSync(outputDir, { recursive: true });
+  for (const pack of contextPacks) {
+    writeJson(join(outputDir, `${topicFileName(pack.topic.id)}.json`), pack);
+  }
 }
 
-function findFirstFileAnchor(
-  pack: TopicContextPack,
-):
-  | {
-      file: TopicContextPack["candidateFiles"][number];
-      anchor: ProductContextAnchor;
-    }
-  | undefined {
-  for (const file of pack.candidateFiles) {
-    const anchor = file.anchors[0];
-    if (anchor) {
-      return { file, anchor };
-    }
+function readProductExtractions(
+  extractionsByTopicDir: string,
+  extractionsPath: string,
+): unknown[] {
+  const fragmentPaths = listJsonFiles(extractionsByTopicDir);
+  if (fragmentPaths.length > 0) {
+    return fragmentPaths.flatMap((path) => {
+      const data = readJsonFile<unknown>(path, "Invalid per-topic extraction file.");
+      return Array.isArray(data) ? data : [data];
+    });
   }
-  return undefined;
+
+  if (existsSync(extractionsPath)) {
+    const data = readJsonFile<unknown>(
+      extractionsPath,
+      "product-index-extractions.json not found. LLM analyzer did not write extraction output.",
+    );
+    return Array.isArray(data) ? data : [data];
+  }
+
+  throw new Error(
+    `${extractionsByTopicDir}/*.json or ${extractionsPath}: product-index-extractions-by-topic/*.json or product-index-extractions.json not found. LLM analyzer did not write extraction output.`,
+  );
+}
+
+function listJsonFiles(dir: string): string[] {
+  if (!existsSync(dir)) {
+    return [];
+  }
+
+  return readdirSync(dir)
+    .filter((name) => name.endsWith(".json"))
+    .sort((a, b) => a.localeCompare(b))
+    .map((name) => join(dir, name));
+}
+
+function topicFileName(topicId: string): string {
+  return topicId.replace(/[^a-zA-Z0-9._-]+/gu, "_");
+}
+
+function toPipelineWarning(warning: {
+  code: string;
+  message: string;
+  severity?: "info" | "warning" | "error";
+  stage?: string;
+  topicId?: string;
+  candidateId?: string;
+  fileId?: string;
+  evidenceRef?: string;
+}): ProductPipelineWarning {
+  return {
+    code: warning.code,
+    severity: warning.severity ?? "warning",
+    stage: warning.stage ?? "finalize",
+    message: warning.message,
+    ...(warning.topicId ? { topicId: warning.topicId } : {}),
+    ...(warning.candidateId ? { candidateId: warning.candidateId } : {}),
+    ...(warning.fileId ? { fileId: warning.fileId } : {}),
+    ...(warning.evidenceRef ? { evidenceRef: warning.evidenceRef } : {}),
+  };
 }
 
 function countBusinessSignals(graph: KnowledgeGraph): number {
@@ -382,9 +370,7 @@ function getProductIndexPath(projectRoot: string): string {
 interface ParsedArgs {
   projectRoot: string;
   platform: string;
-  fast: boolean;
-  prepare: boolean;
-  finalize: boolean;
+  stage: "prepare-candidates" | "build-context-packs" | "finalize";
   entryPatterns?: string[];
   maxDepth: number;
   maxNodesPerTopic: number;
@@ -403,7 +389,12 @@ const VALUE_FLAGS = new Set([
   "--hub-degree-threshold",
 ]);
 
-const BOOLEAN_FLAGS = new Set(["--fast", "--prepare", "--finalize"]);
+const BOOLEAN_FLAGS = new Set([
+  "--prepare",
+  "--prepare-candidates",
+  "--build-context-packs",
+  "--finalize",
+]);
 const NUMERIC_FLAGS = new Set([
   "--max-depth",
   "--max-nodes-per-topic",
@@ -416,7 +407,7 @@ function parseArgs(argv: string[]): ParsedArgs {
   const projectRoot = argv[0];
   if (!projectRoot || projectRoot.startsWith("--")) {
     throw new Error(
-      "Usage: product-index-cli <project-root> [--platform android] [--fast]",
+      "Usage: product-index-cli <project-root> (--prepare-candidates | --build-context-packs | --finalize) [--platform android]",
     );
   }
 
@@ -449,44 +440,69 @@ function parseArgs(argv: string[]): ParsedArgs {
 
   const entryPatternsValue = values.get("--entry-patterns") ?? "";
   const selectedModes = [
-    booleans.has("--prepare"),
+    booleans.has("--prepare") || booleans.has("--prepare-candidates"),
+    booleans.has("--build-context-packs"),
     booleans.has("--finalize"),
-    booleans.has("--fast"),
   ].filter(Boolean).length;
   if (selectedModes > 1) {
-    throw new Error("Choose only one of --prepare, --finalize, or --fast.");
+    throw new Error("Choose only one of --prepare-candidates, --build-context-packs, or --finalize.");
+  }
+
+  const maxDepth = getNumberFlagValue(values, "--max-depth", 8);
+  const maxNodesPerTopic = getNumberFlagValue(values, "--max-nodes-per-topic", 240);
+  const maxFrontierPerDepth = getNumberFlagValue(
+    values,
+    "--max-frontier-per-depth",
+    40,
+  );
+  const maxEvidencePerTopic = getNumberFlagValue(
+    values,
+    "--max-evidence-per-topic",
+    50,
+  );
+  const hubDegreeThreshold = getNumberFlagValue(
+    values,
+    "--hub-degree-threshold",
+    80,
+  );
+  const stage = parseStage(booleans);
+  if (!stage) {
+    throw new Error(
+      "Please run through /understand-product or specify one stage: --prepare-candidates | --build-context-packs | --finalize",
+    );
   }
 
   return {
     projectRoot,
     platform: values.get("--platform") ?? "android",
-    fast: booleans.has("--fast"),
-    prepare: booleans.has("--prepare"),
-    finalize: booleans.has("--finalize"),
+    stage,
     entryPatterns: entryPatternsValue
       ? entryPatternsValue
           .split(",")
           .map((item) => item.trim())
           .filter(Boolean)
       : undefined,
-    maxDepth: getNumberFlagValue(values, "--max-depth", 8),
-    maxNodesPerTopic: getNumberFlagValue(values, "--max-nodes-per-topic", 240),
-    maxFrontierPerDepth: getNumberFlagValue(
-      values,
-      "--max-frontier-per-depth",
-      40,
-    ),
-    maxEvidencePerTopic: getNumberFlagValue(
-      values,
-      "--max-evidence-per-topic",
-      50,
-    ),
-    hubDegreeThreshold: getNumberFlagValue(
-      values,
-      "--hub-degree-threshold",
-      80,
-    ),
+    maxDepth,
+    maxNodesPerTopic,
+    maxFrontierPerDepth,
+    maxEvidencePerTopic,
+    hubDegreeThreshold,
   };
+}
+
+function parseStage(
+  booleans: Set<string>,
+): ParsedArgs["stage"] | undefined {
+  if (booleans.has("--prepare") || booleans.has("--prepare-candidates")) {
+    return "prepare-candidates";
+  }
+  if (booleans.has("--build-context-packs")) {
+    return "build-context-packs";
+  }
+  if (booleans.has("--finalize")) {
+    return "finalize";
+  }
+  return undefined;
 }
 
 function getNumberFlagValue(

@@ -74,34 +74,39 @@ describe("product-index CLI", () => {
     }
   });
 
-  it("builds product-index.json and product-signals.jsonl", async () => {
+  it("prepares boundary candidates without product-index.json", async () => {
     const result = await runProductIndexCli([
       testRoot,
       "--platform",
       "android",
-      "--fast",
+      "--prepare-candidates",
     ]);
     expect(result.productIndexPath.endsWith("product-index.json")).toBe(true);
     expect(
       existsSync(join(testRoot, ".understand-anything", "product-index.json")),
-    ).toBe(true);
+    ).toBe(false);
     expect(
       existsSync(join(testRoot, ".understand-anything", "product-signals.jsonl")),
     ).toBe(true);
 
     const raw = JSON.parse(
       readFileSync(
-        join(testRoot, ".understand-anything", "product-index.json"),
+        join(
+          testRoot,
+          ".understand-anything",
+          "intermediate",
+          "product-boundary-candidates.json",
+        ),
         "utf-8",
       ),
-    ) as { topics: unknown[] };
-    expect(raw.topics.length).toBeGreaterThan(0);
+    ) as unknown[];
+    expect(raw.length).toBeGreaterThan(0);
   });
 
   it("throws a clear error when knowledge graph is missing", async () => {
     rmSync(join(testRoot, ".understand-anything", "knowledge-graph.json"));
     await expect(
-      runProductIndexCli([testRoot, "--platform", "android", "--fast"]),
+      runProductIndexCli([testRoot, "--platform", "android", "--prepare-candidates"]),
     ).rejects.toThrow(/knowledge-graph\.json not found/);
   });
 
@@ -113,7 +118,7 @@ describe("product-index CLI", () => {
 
   it("rejects flag-like project roots with usage error", async () => {
     await expect(runProductIndexCli(["--unknown"])).rejects.toThrow(/Usage:/);
-    await expect(runProductIndexCli(["--fast"])).rejects.toThrow(/Usage:/);
+    await expect(runProductIndexCli(["--prepare-candidates"])).rejects.toThrow(/Usage:/);
   });
 
   it("rejects value flags with missing values", async () => {
@@ -121,14 +126,14 @@ describe("product-index CLI", () => {
       /Missing value for --platform/,
     );
     await expect(
-      runProductIndexCli([testRoot, "--platform", "--fast"]),
+      runProductIndexCli([testRoot, "--platform", "--prepare-candidates"]),
     ).rejects.toThrow(/Missing value for --platform/);
   });
 
   it("rejects numeric flags unless they are positive integers", async () => {
     for (const value of ["abc", "Infinity", "0", "-1", "1.5"]) {
       await expect(
-        runProductIndexCli([testRoot, "--max-depth", value]),
+        runProductIndexCli([testRoot, "--prepare-candidates", "--max-depth", value]),
       ).rejects.toThrow(/--max-depth must be a positive integer/);
     }
   });
@@ -140,7 +145,7 @@ describe("product-index CLI", () => {
       nodes: [{ ...graph.nodes[0], filePath }],
     });
 
-    await runProductIndexCli([testRoot, "--platform", "android", "--fast"]);
+    await runProductIndexCli([testRoot, "--platform", "android", "--prepare-candidates"]);
 
     expect(readSignals()[0].filePath).toBe("player/PlayerActivity.kt");
   });
@@ -166,23 +171,28 @@ describe("product-index CLI", () => {
       })),
     });
 
-    await runProductIndexCli([testRoot, "--platform", "android", "--fast"]);
+    await runProductIndexCli([testRoot, "--platform", "android", "--prepare-candidates"]);
 
     const signalContent = readFileSync(
       join(testRoot, ".understand-anything", "product-signals.jsonl"),
       "utf-8",
     );
-    const productIndexContent = readFileSync(
-      join(testRoot, ".understand-anything", "product-index.json"),
+    const candidatesContent = readFileSync(
+      join(
+        testRoot,
+        ".understand-anything",
+        "intermediate",
+        "product-boundary-candidates.json",
+      ),
       "utf-8",
     );
     for (const filePath of unsafePaths) {
       expect(signalContent).not.toContain(filePath);
-      expect(productIndexContent).not.toContain(filePath);
+      expect(candidatesContent).not.toContain(filePath);
     }
     for (const sensitiveToken of ["Users", "private-user", "outsideSecret"]) {
       expect(signalContent).not.toContain(sensitiveToken);
-      expect(productIndexContent).not.toContain(sensitiveToken);
+      expect(candidatesContent).not.toContain(sensitiveToken);
     }
     expect(readSignals().every((signal) => signal.filePath === undefined)).toBe(
       true,

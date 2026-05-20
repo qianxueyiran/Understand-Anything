@@ -130,8 +130,13 @@ export const ProductFactSchema = z
 
 export const ProductCoverageWarningSchema = z.object({
   code: z.string().min(1),
+  severity: z.enum(["info", "warning", "error"]).optional(),
+  stage: z.string().min(1).optional(),
   message: z.string().min(1),
   topicId: z.string().min(1).optional(),
+  candidateId: z.string().min(1).optional(),
+  fileId: z.string().min(1).optional(),
+  evidenceRef: z.string().min(1).optional(),
 });
 
 export const ProductCoverageSchema = z.object({

@@ -130,6 +130,17 @@ export {
   type TopicContextPack,
   type TopicContextPackOptions,
 } from "./product-index-builder.js";
+export {
+  ProductTopicNormalizationSchema,
+  PipelineWarningSeveritySchema,
+  applyTopicNormalization,
+  buildProductIndexTrace,
+  validateProductExtractions,
+  validateTopicNormalization,
+  type ProductIndexTrace,
+  type ProductPipelineWarning,
+  type ProductTopicNormalization,
+} from "./product-index-pipeline.js";
 // Non-code parsers
 export {
   MarkdownParser,

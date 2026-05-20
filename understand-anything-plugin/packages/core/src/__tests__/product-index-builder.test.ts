@@ -329,6 +329,113 @@ describe("product index builder", () => {
     ]);
   });
 
+  it("uses Android framework entry points when enumerating product seeds", () => {
+    const androidGraph = graphWith(
+      [
+        node({
+          id: "class:provider/PlaybackContentProvider.kt:PlaybackContentProvider",
+          name: "PlaybackContentProvider",
+          filePath: "provider/PlaybackContentProvider.kt",
+          summary: "播放记录 ContentProvider。",
+          tags: ["content-provider", "android"],
+        }),
+      ],
+      [],
+      {
+        project: {
+          name: "video-app",
+          languages: ["kotlin"],
+          frameworks: ["Android"],
+          description: "Video app",
+          analyzedAt: "2026-05-18T00:00:00.000Z",
+          gitCommitHash: "abc123",
+        },
+      },
+    );
+
+    const seeds = enumerateProductEntrySeeds(androidGraph, { platform: "android" });
+
+    expect(seeds.map((seed) => seed.entryNodeId)).toEqual([
+      "class:provider/PlaybackContentProvider.kt:PlaybackContentProvider",
+    ]);
+  });
+
+  it("covers common Android business entry suffixes from the framework profile", () => {
+    const androidGraph = graphWith(
+      [
+        node({
+          id: "class:entry/PlaybackEntry.kt:PlaybackEntry",
+          name: "PlaybackEntry",
+          filePath: "entry/PlaybackEntry.kt",
+          tags: ["entry"],
+        }),
+        node({
+          id: "class:startup/AppStartup.kt:AppStartup",
+          name: "AppStartup",
+          filePath: "startup/AppStartup.kt",
+          tags: ["startup"],
+        }),
+        node({
+          id: "class:boot/ColdBoot.kt:ColdBoot",
+          name: "ColdBoot",
+          filePath: "boot/ColdBoot.kt",
+          tags: ["boot"],
+        }),
+        node({
+          id: "class:task/HistorySyncTask.kt:HistorySyncTask",
+          name: "HistorySyncTask",
+          filePath: "task/HistorySyncTask.kt",
+          tags: ["task"],
+        }),
+        node({
+          id: "class:proxy/PlaybackActivityProxy.kt:PlaybackActivityProxy",
+          name: "PlaybackActivityProxy",
+          filePath: "proxy/PlaybackActivityProxy.kt",
+          tags: ["activity-proxy"],
+        }),
+        node({
+          id: "class:presenter/PlaybackPresenter.kt:PlaybackPresenter",
+          name: "PlaybackPresenter",
+          filePath: "presenter/PlaybackPresenter.kt",
+          tags: ["presenter"],
+        }),
+      ],
+      [],
+      {
+        project: {
+          name: "video-app",
+          languages: ["kotlin"],
+          frameworks: ["android"],
+          description: "Video app",
+          analyzedAt: "2026-05-18T00:00:00.000Z",
+          gitCommitHash: "abc123",
+        },
+      },
+    );
+
+    const seeds = enumerateProductEntrySeeds(androidGraph, { platform: "android" });
+    const seedKinds = new Map(seeds.map((seed) => [seed.entryNodeId, seed.entryKind]));
+
+    expect(Array.from(seedKinds.keys())).toEqual([
+      "class:boot/ColdBoot.kt:ColdBoot",
+      "class:entry/PlaybackEntry.kt:PlaybackEntry",
+      "class:presenter/PlaybackPresenter.kt:PlaybackPresenter",
+      "class:proxy/PlaybackActivityProxy.kt:PlaybackActivityProxy",
+      "class:startup/AppStartup.kt:AppStartup",
+      "class:task/HistorySyncTask.kt:HistorySyncTask",
+    ]);
+    expect(seedKinds.get("class:entry/PlaybackEntry.kt:PlaybackEntry")).toBe("entry");
+    expect(seedKinds.get("class:startup/AppStartup.kt:AppStartup")).toBe("startup");
+    expect(seedKinds.get("class:boot/ColdBoot.kt:ColdBoot")).toBe("boot");
+    expect(seedKinds.get("class:task/HistorySyncTask.kt:HistorySyncTask")).toBe("task");
+    expect(seedKinds.get("class:proxy/PlaybackActivityProxy.kt:PlaybackActivityProxy")).toBe(
+      "activity-proxy",
+    );
+    expect(seedKinds.get("class:presenter/PlaybackPresenter.kt:PlaybackPresenter")).toBe(
+      "presenter",
+    );
+  });
+
   it("throws a clear error for invalid custom entry pattern syntax", () => {
     expect(() =>
       enumerateProductEntrySeeds(graph, {
