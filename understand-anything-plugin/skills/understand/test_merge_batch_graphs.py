@@ -875,6 +875,103 @@ class MergeIntegrationTests(unittest.TestCase):
             "\n".join(report),
         )
 
+    def test_shard_mode_drops_edges_with_empty_endpoints(self) -> None:
+        batch = {
+            "nodes": [
+                _file_node("src/local.ts"),
+            ],
+            "edges": [
+                {
+                    "source": "",
+                    "target": "file:src/external.ts",
+                    "type": "imports",
+                    "direction": "forward",
+                    "weight": 0.7,
+                },
+                {
+                    "source": "file:src/local.ts",
+                    "target": "",
+                    "type": "imports",
+                    "direction": "forward",
+                    "weight": 0.7,
+                },
+            ],
+        }
+
+        assembled, report = mbg.merge_and_normalize([batch], allow_external_edges=True)
+
+        self.assertEqual(assembled["edges"], [])
+        self.assertFalse(
+            any("external edges preserved" in line for line in report),
+            "\n".join(report),
+        )
+        self.assertTrue(
+            any("dropped, missing source" in line for line in report),
+            "\n".join(report),
+        )
+        self.assertTrue(
+            any("dropped, missing target" in line for line in report),
+            "\n".join(report),
+        )
+
+    def test_full_mode_strips_existing_external_markers_from_edges(self) -> None:
+        batch = {
+            "nodes": [
+                _file_node("src/local.ts"),
+                _file_node("src/target.ts"),
+            ],
+            "edges": [
+                {
+                    "source": "file:src/local.ts",
+                    "target": "file:src/target.ts",
+                    "type": "imports",
+                    "direction": "forward",
+                    "weight": 0.7,
+                    "external": True,
+                    "externalReason": "stale marker",
+                },
+            ],
+        }
+
+        assembled, _report = mbg.merge_and_normalize([batch])
+
+        self.assertEqual(len(assembled["edges"]), 1)
+        edge = assembled["edges"][0]
+        self.assertNotIn("external", edge)
+        self.assertNotIn("externalReason", edge)
+
+    def test_external_edge_report_counts_deduped_output_edges(self) -> None:
+        batch = {
+            "nodes": [
+                _file_node("src/local.ts"),
+            ],
+            "edges": [
+                {
+                    "source": "file:src/local.ts",
+                    "target": "file:src/external.ts",
+                    "type": "imports",
+                    "direction": "forward",
+                    "weight": 0.5,
+                },
+                {
+                    "source": "file:src/local.ts",
+                    "target": "file:src/external.ts",
+                    "type": "imports",
+                    "direction": "forward",
+                    "weight": 0.9,
+                },
+            ],
+        }
+
+        assembled, report = mbg.merge_and_normalize([batch], allow_external_edges=True)
+
+        self.assertEqual(len(assembled["edges"]), 1)
+        self.assertTrue(assembled["edges"][0]["external"])
+        self.assertTrue(
+            any("   1 × external edges preserved for shard mode" in line for line in report),
+            "\n".join(report),
+        )
+
     def test_cli_accepts_allow_external_edges_flag(self) -> None:
         args = mbg.parse_args(["/tmp/project", "--allow-external-edges"])
 

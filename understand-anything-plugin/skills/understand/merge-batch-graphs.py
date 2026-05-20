@@ -854,32 +854,36 @@ def merge_and_normalize(
 
     # ── Step 6: Deduplicate edges, drop dangling ─────────────────────
     node_ids = set(nodes_by_id.keys())
-    external_edges_preserved = 0
     # Direction is part of the dedup key so a `forward` edge does not silently
     # overwrite a `bidirectional` one (or vice versa); they're different
     # semantic relationships that the dashboard renders distinctly.
     edges_by_key: dict[tuple[str, str, str, str], dict] = {}
     for edge in all_edges:
+        edge = dict(edge)
+        edge.pop("external", None)
+        edge.pop("externalReason", None)
+
         src = edge.get("source", "")
         tgt = edge.get("target", "")
         etype = edge.get("type", "")
         direction = edge.get("direction", "forward")
+        valid_src = isinstance(src, str) and bool(src)
+        valid_tgt = isinstance(tgt, str) and bool(tgt)
 
-        if src not in node_ids or tgt not in node_ids:
+        if not valid_src or not valid_tgt or src not in node_ids or tgt not in node_ids:
             missing = []
-            if src not in node_ids:
+            if not valid_src or src not in node_ids:
                 missing.append("source")
-            if tgt not in node_ids:
+            if not valid_tgt or tgt not in node_ids:
                 missing.append("target")
-            if allow_external_edges:
+            if allow_external_edges and valid_src and valid_tgt:
                 edge["external"] = True
                 edge["externalReason"] = f"missing {' and '.join(missing)} in current shard"
-                external_edges_preserved += 1
             else:
                 missing_details = []
-                if src not in node_ids:
+                if not valid_src or src not in node_ids:
                     missing_details.append(f"source '{src}'")
-                if tgt not in node_ids:
+                if not valid_tgt or tgt not in node_ids:
                     missing_details.append(f"target '{tgt}'")
                 unfixable.append(f"Edge {src} → {tgt} ({etype}): dropped, missing {', '.join(missing_details)}")
                 continue
@@ -888,6 +892,11 @@ def merge_and_normalize(
         existing = edges_by_key.get(key)
         if existing is None or _num(edge.get("weight", 0)) > _num(existing.get("weight", 0)):
             edges_by_key[key] = edge
+
+    external_edges_preserved = sum(
+        1 for edge in edges_by_key.values()
+        if edge.get("external") is True
+    )
 
     # ── Build report ─────────────────────────────────────────────────
     report: list[str] = []
