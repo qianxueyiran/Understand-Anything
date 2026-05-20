@@ -1,6 +1,7 @@
 export const SHARD_ID_PATTERN = /^[A-Za-z0-9_-]+$/;
 
 export interface DomainShardedManifest {
+  version: "1.0.0";
   kind: "domain-sharded";
   source: {
     codeManifest: "knowledge-graph.json";
@@ -10,13 +11,20 @@ export interface DomainShardedManifest {
     path: string;
     sourceCodeShard: string;
   }>;
+  warnings: string[];
 }
 
 export interface ProductShardedManifest {
+  version: "1.0.0";
   kind: "product-sharded";
+  source: {
+    codeManifest: "knowledge-graph.json";
+    domainManifest: "domain-graph.json";
+  };
   shards: Array<{
     id: string;
     path: string;
+    sourceCodeShard: string;
     sourceDomainShard?: string;
     tracePath?: string;
   }>;
@@ -52,34 +60,47 @@ export function getTopLevelKind(value: unknown): string | undefined {
 
 export function buildDomainShardedManifest(shardFiles: string[]): DomainShardedManifest {
   return {
+    version: "1.0.0",
     kind: "domain-sharded",
     source: {
       codeManifest: "knowledge-graph.json",
     },
-    shards: shardFiles.map((fileName) => {
-      const shardId = getShardIdFromFileName(fileName);
-      return {
-        id: shardId,
-        path: `domain-shards/${shardId}.json`,
-        sourceCodeShard: `shards/${shardId}.json`,
-      };
+    shards: shardFiles.flatMap((fileName) => {
+      const shardId = parseShardIdFromFileName(fileName);
+      if (shardId === undefined) {
+        return [];
+      }
+
+      return [
+        {
+          id: shardId,
+          path: `domain-shards/${shardId}.json`,
+          sourceCodeShard: `shards/${shardId}.json`,
+        },
+      ];
     }),
+    warnings: [],
   };
 }
 
 export function buildProductShardedManifest(
   input: ProductShardedManifestInput
 ): ProductShardedManifest {
-  const domainShardIds = new Set(input.domainShardFiles.map(getShardIdFromFileName));
-  const traceShardIds = new Set(input.traceFiles.map(getShardIdFromFileName));
+  const domainShardIds = new Set(input.domainShardFiles.flatMap(parseShardIdToArray));
+  const traceShardIds = new Set(input.traceFiles.flatMap(parseShardIdToArray));
   const warnings: string[] = [];
 
-  const shards = input.productShardFiles.map((fileName) => {
-    const shardId = getShardIdFromFileName(fileName);
+  const shards = input.productShardFiles.flatMap((fileName) => {
+    const shardId = parseShardIdFromFileName(fileName);
+    if (shardId === undefined) {
+      return [];
+    }
+
     const path = `product-shards/${shardId}.json`;
     const shard: ProductShardedManifest["shards"][number] = {
       id: shardId,
       path,
+      sourceCodeShard: `shards/${shardId}.json`,
     };
 
     if (domainShardIds.has(shardId)) {
@@ -92,18 +113,31 @@ export function buildProductShardedManifest(
       warnings.push(`${path} has no matching product-traces/${shardId}.json`);
     }
 
-    return shard;
+    return [shard];
   });
 
   return {
+    version: "1.0.0",
     kind: "product-sharded",
+    source: {
+      codeManifest: "knowledge-graph.json",
+      domainManifest: "domain-graph.json",
+    },
     shards,
     warnings,
   };
 }
 
-function getShardIdFromFileName(fileName: string): string {
-  const baseName = fileName.split(/[\\/]/).pop() ?? fileName;
-  const shardId = baseName.endsWith(".json") ? baseName.slice(0, -".json".length) : baseName;
-  return validateShardId(shardId);
+function parseShardIdToArray(fileName: string): string[] {
+  const shardId = parseShardIdFromFileName(fileName);
+  return shardId === undefined ? [] : [shardId];
+}
+
+function parseShardIdFromFileName(fileName: string): string | undefined {
+  if (!fileName.endsWith(".json") || fileName.includes("/") || fileName.includes("\\")) {
+    return undefined;
+  }
+
+  const shardId = fileName.slice(0, -".json".length);
+  return isValidShardId(shardId) ? shardId : undefined;
 }
