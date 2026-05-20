@@ -108,6 +108,31 @@ class RefreshShardedManifestTests(unittest.TestCase):
             self.assertEqual([shard["id"] for shard in manifest["shards"]], ["valid"])
             self.assertTrue(any("broken.json" in warning for warning in manifest["warnings"]))
 
+    def test_skips_non_object_shard_files(self):
+        refresh_manifest = load_refresh_manifest()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            shards_dir = root / ".understand-anything" / "shards"
+            shards_dir.mkdir(parents=True)
+
+            self.write_json(
+                shards_dir / "home.json",
+                {
+                    "shard": {"id": "home", "scopes": ["a_home"]},
+                    "project": {"name": "Demo", "languages": ["TypeScript"]},
+                    "nodes": [{"id": "home.ts"}],
+                    "edges": [],
+                },
+            )
+            self.write_json(shards_dir / "array.json", [])
+
+            manifest = refresh_manifest(root)
+
+            self.assertEqual(manifest["overview"]["shardCount"], 1)
+            self.assertEqual([shard["id"] for shard in manifest["shards"]], ["home"])
+            self.assertTrue(any("array.json" in warning for warning in manifest["warnings"]))
+
     def write_json(self, path, value):
         path.write_text(json.dumps(value), encoding="utf-8")
 

@@ -20,10 +20,10 @@ def refresh_manifest(project_root: str | Path) -> dict[str, Any]:
     total_edges = 0
 
     for shard_path in sorted(shards_dir.glob("*.json")):
-        try:
-            graph = json.loads(shard_path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError) as exc:
-            warnings.append(f"Skipped {shard_path.name}: {exc}")
+        graph, warning = _read_graph(shard_path)
+        if warning is not None:
+            warnings.append(warning)
+        if graph is None:
             continue
 
         nodes = graph.get("nodes")
@@ -76,6 +76,17 @@ def refresh_manifest(project_root: str | Path) -> dict[str, Any]:
         encoding="utf-8",
     )
     return manifest
+
+
+def _read_graph(shard_path: Path) -> tuple[dict[str, Any] | None, str | None]:
+    try:
+        data = json.loads(shard_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        return None, f"Skipped {shard_path.name}: {exc}"
+
+    if not isinstance(data, dict):
+        return None, f"Skipped {shard_path.name}: shard manifest must be an object"
+    return data, None
 
 
 def _merge_projects(projects: list[dict[str, Any]]) -> dict[str, Any]:
