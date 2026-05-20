@@ -28,6 +28,13 @@ describe("understand-product strict docs", () => {
   it("requires topic normalization before context packs", () => {
     expect(normalizer).toContain("product-boundary-candidates.json");
     expect(normalizer).toContain("product-topic-normalization.json");
+    expect(normalizer).toContain("`capability`");
+    expect(normalizer).toContain("`surface`");
+    expect(normalizer).toContain("`integration`");
+    expect(normalizer).toContain("`data`");
+    expect(normalizer).toContain("`process`");
+    expect(normalizer).not.toContain("`intergration`");
+    expect(normalizer).not.toContain("`element`");
     expect(normalizer).toContain("不能抽取 facts");
     expect(normalizer).toContain("不能全项目搜索源码");
   });

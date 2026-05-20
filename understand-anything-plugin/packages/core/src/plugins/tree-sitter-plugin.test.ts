@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeAll } from "vitest";
 import { TreeSitterPlugin } from "./tree-sitter-plugin.js";
+import { kotlinConfig } from "../languages/configs/kotlin.js";
 
 describe("TreeSitterPlugin", () => {
   let plugin: TreeSitterPlugin;
@@ -291,6 +292,29 @@ function main() {
         (e) => e.caller === "greet" && e.callee === "formatMessage",
       );
       expect(formatCall).toBeDefined();
+    });
+  });
+
+  describe("configured language grammars", () => {
+    it("loads Kotlin grammar and extracts functions through TreeSitterPlugin", async () => {
+      const kotlinPlugin = new TreeSitterPlugin([kotlinConfig]);
+      await kotlinPlugin.init();
+
+      const result = kotlinPlugin.analyzeFile(
+        "HomeViewModel.kt",
+        `class HomeViewModel {
+    fun loadHome(userId: String): HomeState {
+        return HomeState()
+    }
+}
+`,
+      );
+
+      expect(kotlinPlugin.languages).toContain("kotlin");
+      expect(result.classes.map((cls) => cls.name)).toEqual(["HomeViewModel"]);
+      expect(result.functions.map((fn) => fn.name)).toEqual(["loadHome"]);
+      expect(result.functions[0].params).toEqual(["userId"]);
+      expect(result.functions[0].returnType).toBe("HomeState");
     });
   });
 

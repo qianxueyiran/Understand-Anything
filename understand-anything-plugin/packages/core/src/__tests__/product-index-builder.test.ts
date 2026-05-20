@@ -436,6 +436,79 @@ describe("product index builder", () => {
     );
   });
 
+  it("maps background and startup entries to process topics", () => {
+    const processGraph = graphWith(
+      [
+        node({
+          id: "class:startup/AppStartup.kt:AppStartup",
+          name: "AppStartup",
+          filePath: "startup/AppStartup.kt",
+          tags: ["startup"],
+        }),
+        node({
+          id: "class:boot/ColdBoot.kt:ColdBoot",
+          name: "ColdBoot",
+          filePath: "boot/ColdBoot.kt",
+          tags: ["boot"],
+        }),
+        node({
+          id: "class:download/DownloadWorker.kt:DownloadWorker",
+          name: "DownloadWorker",
+          filePath: "download/DownloadWorker.kt",
+          tags: ["worker", "download"],
+        }),
+        node({
+          id: "class:task/HistorySyncTask.kt:HistorySyncTask",
+          name: "HistorySyncTask",
+          filePath: "task/HistorySyncTask.kt",
+          tags: ["task"],
+        }),
+        node({
+          id: "class:job/CleanupJob.kt:CleanupJob",
+          name: "CleanupJob",
+          filePath: "job/CleanupJob.kt",
+          tags: ["job"],
+        }),
+        node({
+          id: "class:scheduler/RefreshScheduler.kt:RefreshScheduler",
+          name: "RefreshScheduler",
+          filePath: "scheduler/RefreshScheduler.kt",
+          tags: ["scheduler"],
+        }),
+      ],
+      [],
+      {
+        project: {
+          name: "video-app",
+          languages: ["kotlin"],
+          frameworks: ["android"],
+          description: "Video app",
+          analyzedAt: "2026-05-18T00:00:00.000Z",
+          gitCommitHash: "abc123",
+        },
+      },
+    );
+
+    const index = buildDeterministicProductIndex(processGraph, undefined, {
+      platform: "android",
+      analyzedAt: "2026-05-18T00:00:00.000Z",
+      maxDepth: 1,
+      maxNodesPerTopic: 5,
+      maxFrontierPerDepth: 5,
+      maxEvidencePerTopic: 5,
+      hubDegreeThreshold: 20,
+    });
+
+    expect(index.topics.map((topic) => topic.kind)).toEqual([
+      "process",
+      "process",
+      "process",
+      "process",
+      "process",
+      "process",
+    ]);
+  });
+
   it("throws a clear error for invalid custom entry pattern syntax", () => {
     expect(() =>
       enumerateProductEntrySeeds(graph, {

@@ -108,6 +108,20 @@ describe("ProductIndex schema", () => {
     expect(result.data?.topics[0].name).toBe("投屏");
   });
 
+  it("accepts process topics", () => {
+    const result = validateProductIndex({
+      ...sampleIndex,
+      topics: [
+        {
+          ...sampleIndex.topics[0],
+          kind: "process",
+        },
+      ],
+    });
+
+    expect(result.success).toBe(true);
+  });
+
   it("validates grounded topics, facts, and evidence", () => {
     const result = validateProductIndex({
       version: "1.0.0",

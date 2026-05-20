@@ -4,9 +4,9 @@ import { z } from "zod";
 export const ProductTopicKindSchema = z.enum([
   "capability",
   "surface",
-  "element",
   "data",
   "integration",
+  "process",
 ]);
 export const ProductTopicStatusSchema = z.enum(["seeded", "indexed", "summarized", "verified"]);
 export const ProductFactTypeSchema = z.enum([

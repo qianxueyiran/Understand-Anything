@@ -1070,10 +1070,17 @@ function topicKindForEntry(entryKind: string): ProductTopicKind {
   if (entryKind === "activity" || entryKind === "fragment") {
     return "surface";
   }
-  if (entryKind === "router") {
-    return "capability";
+  if (
+    entryKind === "startup" ||
+    entryKind === "boot" ||
+    entryKind === "worker" ||
+    entryKind === "task" ||
+    entryKind === "job" ||
+    entryKind === "scheduler"
+  ) {
+    return "process";
   }
-  return "element";
+  return "capability";
 }
 
 function inferSignalRoles(text: string): ProductEvidenceRole[] {

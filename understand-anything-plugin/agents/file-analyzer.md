@@ -233,9 +233,9 @@ When analyzing Android Java/Kotlin projects:
 - Use Android resources, route names, navigation graphs, Manifest entries, menu labels, analytics/event names, API paths, and user action names to infer business meaning.
 - Do not turn technical roles such as `Presenter`, `Repository`, `Adapter`, or `Manager` directly into business domains. They are implementation evidence that must be interpreted with product-facing clues.
 
-### Step 2 -- Create Function and Class Nodes
+### Step 2 -- **Create Function and Class Nodes**
 
-For significant functions and classes from the script output (code files only), create `function:` and `class:` nodes.
+For significant functions and classes from the script output (code files only), **create `function:` and `class:` nodes**.
 
 **Significance filter** -- only create nodes for:
 - Functions/methods with 10+ lines (skip trivial one-liners)
@@ -246,9 +246,9 @@ Skip trivial one-liners, type aliases, simple re-exports, and auto-generated boi
 
 For each function/class node, provide a `summary` and `tags` using the same guidelines as file nodes.
 
-### Business Signals
+#### Business Signals
 
-When a file, class, function, method, endpoint, service, receiver, route, task, or resource clearly carries product-facing or business behavior, add a `businessSignals` array to that node.
+When a file, class, function, method, endpoint, service, receiver, route, task, or resource clearly carries product-facing or business behavior, **add a `businessSignals` array to that node**.
 
 Signal schema:
 

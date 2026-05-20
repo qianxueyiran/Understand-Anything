@@ -74,11 +74,11 @@ model: inherit
 2. Topic name 必须是产品化名称，不要输出纯类名、函数名、文件名或入口类型集合。
 3. Topic summary 必须描述独立的用户可感知能力、业务规则、页面、跨模块能力、数据或集成效果，不要解释代码调用关系。
 4. `kind` 只能使用以下类型：
-- `capability`：独立的业务能力：如投屏能力、互动营销能力
-- `surface`：页面或独立的展示区域：如片库页、首页内容区、播放浮层
-- `element`、
-`data`、
-`integration`。
+- `capability`: 独立的业务能力，如投屏能力、互动营销能力
+- `surface`: 页面或独立的展示区域，如片库页、首页内容区、播放浮层
+- `integration`: 跨模块交互，如多业务协同完成一个目标
+- `data`: 独立的数据处理机制，如Pingback机制、播放记录数据同步机制
+- `process`: 独立的业务流程，如启动流程、起播流程、登录流程
 5. `sourceCandidateIds` 只能引用输入中已有 candidate。
 6. `rootNodeIds` 只能来自输入 candidate 的 `rootNodeId` 或其直接相关节点。
 7. 本阶段不能抽取 facts，不能选择 `evidenceRefs`，不能生成 evidence。
