@@ -167,6 +167,53 @@ class RefreshShardedManifestTests(unittest.TestCase):
             self.assertEqual([shard["id"] for shard in manifest["shards"]], ["home"])
             self.assertTrue(any("array.json" in warning for warning in manifest["warnings"]))
 
+    def test_preserves_existing_update_metadata(self):
+        refresh_manifest = load_refresh_manifest()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            understand_dir = root / ".understand-anything"
+            shards_dir = understand_dir / "shards"
+            shards_dir.mkdir(parents=True)
+
+            self.write_json(
+                understand_dir / "knowledge-graph.json",
+                {
+                    "kind": "codebase-sharded",
+                    "version": "1.0.0",
+                    "update": {
+                        "gitCommitHash": "abc123",
+                        "updatedAt": "2026-05-21T00:00:00.000Z",
+                        "shards": {
+                            "home": {
+                                "artifactHash": "sha256:old",
+                                "fingerprintPath": "fingerprints/shards/home.json",
+                            }
+                        },
+                        "warnings": ["kept"],
+                    },
+                },
+            )
+            self.write_json(
+                shards_dir / "home.json",
+                {
+                    "shard": {"id": "home", "scopes": ["a_home"]},
+                    "project": {"name": "Demo"},
+                    "nodes": [{"id": "file:a_home/Home.kt"}],
+                    "edges": [],
+                },
+            )
+
+            manifest = refresh_manifest(root)
+            output_manifest = json.loads((understand_dir / "knowledge-graph.json").read_text())
+
+            self.assertEqual(manifest["update"]["gitCommitHash"], "abc123")
+            self.assertEqual(
+                manifest["update"]["shards"]["home"]["fingerprintPath"],
+                "fingerprints/shards/home.json",
+            )
+            self.assertEqual(output_manifest["update"], manifest["update"])
+
     def write_json(self, path, value):
         path.write_text(json.dumps(value), encoding="utf-8")
 

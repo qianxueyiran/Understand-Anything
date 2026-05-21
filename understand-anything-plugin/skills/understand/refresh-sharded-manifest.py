@@ -18,6 +18,7 @@ def refresh_manifest(project_root: str | Path) -> dict[str, Any]:
     projects: list[dict[str, Any]] = []
     total_nodes = 0
     total_edges = 0
+    existing_update = _read_existing_manifest_update(ua_dir / "knowledge-graph.json")
 
     for shard_path in sorted(shards_dir.glob("*.json")):
         graph, warning = _read_graph(shard_path)
@@ -78,6 +79,8 @@ def refresh_manifest(project_root: str | Path) -> dict[str, Any]:
         "shards": shards,
         "warnings": warnings,
     }
+    if existing_update is not None:
+        manifest["update"] = existing_update
 
     ua_dir.mkdir(parents=True, exist_ok=True)
     (ua_dir / "knowledge-graph.json").write_text(
@@ -96,6 +99,19 @@ def _read_graph(shard_path: Path) -> tuple[dict[str, Any] | None, str | None]:
     if not isinstance(data, dict):
         return None, f"Skipped {shard_path.name}: shard manifest must be an object"
     return data, None
+
+
+def _read_existing_manifest_update(manifest_path: Path) -> dict[str, Any] | None:
+    if not manifest_path.exists():
+        return None
+    try:
+        data = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    if not isinstance(data, dict):
+        return None
+    update = data.get("update")
+    return update if isinstance(update, dict) else None
 
 
 def _merge_projects(projects: list[dict[str, Any]]) -> dict[str, Any]:
