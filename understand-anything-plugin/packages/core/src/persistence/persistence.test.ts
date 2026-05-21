@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { writeFileSync } from "node:fs";
-import { saveGraph, loadGraph, saveMeta, loadMeta, saveFingerprints, loadFingerprints, saveConfig, loadConfig } from "./index.js";
+import { saveGraph, loadGraph, saveMeta, loadMeta, saveFingerprints, loadFingerprints, saveShardFingerprints, loadShardFingerprints, saveConfig, loadConfig } from "./index.js";
 import type { KnowledgeGraph, AnalysisMeta } from "../types.js";
 import type { FingerprintStore } from "../fingerprint.js";
 
@@ -175,6 +175,47 @@ describe("persistence", () => {
 
       const loaded = loadFingerprints(tempDir);
       expect(loaded).toBeNull();
+    });
+
+    it("should round-trip shard fingerprints and write them under fingerprints/shards", () => {
+      saveShardFingerprints(tempDir, "home", sampleFingerprints);
+
+      const filePath = join(
+        tempDir,
+        ".understand-anything",
+        "fingerprints",
+        "shards",
+        "home.json",
+      );
+      expect(existsSync(filePath)).toBe(true);
+      expect(loadShardFingerprints(tempDir, "home")).toEqual(sampleFingerprints);
+    });
+
+    it("should return null when loading shard fingerprints with an invalid shard id", () => {
+      expect(loadShardFingerprints(tempDir, "../bad")).toBeNull();
+    });
+
+    it("should throw when saving shard fingerprints with an invalid shard id", () => {
+      expect(() => {
+        saveShardFingerprints(tempDir, "../bad", sampleFingerprints);
+      }).toThrow("Invalid shard id: ../bad");
+    });
+
+    it("should return null when shard fingerprint json is corrupted", () => {
+      saveShardFingerprints(tempDir, "home", sampleFingerprints);
+      writeFileSync(
+        join(
+          tempDir,
+          ".understand-anything",
+          "fingerprints",
+          "shards",
+          "home.json",
+        ),
+        "{{not valid json!!",
+        "utf-8",
+      );
+
+      expect(loadShardFingerprints(tempDir, "home")).toBeNull();
     });
   });
 

@@ -1,5 +1,5 @@
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
-import { join, isAbsolute, relative, basename, resolve } from "node:path";
+import { join, isAbsolute, relative, basename, resolve, dirname } from "node:path";
 import type { KnowledgeGraph, AnalysisMeta, ProjectConfig } from "../types.js";
 import type { FingerprintStore } from "../fingerprint.js";
 import { validateGraph } from "../schema.js";
@@ -13,6 +13,7 @@ const UA_DIR = ".understand-anything";
 const GRAPH_FILE = "knowledge-graph.json";
 const META_FILE = "meta.json";
 const FINGERPRINT_FILE = "fingerprints.json";
+const SHARD_ID_PATTERN = /^[A-Za-z0-9_-]+$/;
 const CONFIG_FILE = "config.json";
 const PRODUCT_INDEX_FILE = "product-index.json";
 
@@ -129,6 +130,39 @@ export function saveFingerprints(projectRoot: string, store: FingerprintStore): 
 export function loadFingerprints(projectRoot: string): FingerprintStore | null {
   const filePath = join(projectRoot, UA_DIR, FINGERPRINT_FILE);
   if (!existsSync(filePath)) return null;
+  try {
+    return JSON.parse(readFileSync(filePath, "utf-8")) as FingerprintStore;
+  } catch {
+    return null;
+  }
+}
+
+function shardFingerprintFile(projectRoot: string, shardId: string): string | null {
+  if (!SHARD_ID_PATTERN.test(shardId)) return null;
+  return join(projectRoot, UA_DIR, "fingerprints", "shards", `${shardId}.json`);
+}
+
+export function saveShardFingerprints(
+  projectRoot: string,
+  shardId: string,
+  store: FingerprintStore,
+): void {
+  const filePath = shardFingerprintFile(projectRoot, shardId);
+  if (filePath === null) {
+    throw new Error(`Invalid shard id: ${shardId}`);
+  }
+
+  mkdirSync(dirname(filePath), { recursive: true });
+  writeFileSync(filePath, JSON.stringify(store, null, 2), "utf-8");
+}
+
+export function loadShardFingerprints(
+  projectRoot: string,
+  shardId: string,
+): FingerprintStore | null {
+  const filePath = shardFingerprintFile(projectRoot, shardId);
+  if (filePath === null || !existsSync(filePath)) return null;
+
   try {
     return JSON.parse(readFileSync(filePath, "utf-8")) as FingerprintStore;
   } catch {
