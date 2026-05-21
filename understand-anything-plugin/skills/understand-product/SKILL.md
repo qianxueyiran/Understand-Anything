@@ -1,7 +1,7 @@
 ---
 name: understand-product
 description: 基于已有 /understand 知识图谱生成严格 grounded 的产品知识索引，用于回答客户端产品问题。
-argument-hint: [--platform android] [--entry-patterns <patterns>]
+argument-hint: [--platform android] [--entry-patterns <patterns>] [--shard <id>] [--refresh-shards]
 ---
 
 # /understand-product
@@ -32,6 +32,36 @@ fi
 - `--max-frontier-per-depth <positive integer>`
 - `--max-evidence-per-topic <positive integer>`
 - `--hub-degree-threshold <positive integer>`
+- `--shard <id>`，只处理 `.understand-anything/shards/<id>.json` 对应分片
+- `--refresh-shards`，只刷新 `.understand-anything/product-index.json` manifest
+
+## Phase 0.5: 分片模式
+
+当传入 `--shard <id>` 时，只基于 `$PROJECT_ROOT/.understand-anything/shards/<id>.json` 生成一个 product shard，不默认加载所有 shards。`<id>` 必须匹配 `^[A-Za-z0-9_-]+$`；不匹配时停止并提示用户传入合法 shard id。
+
+当传入 `--refresh-shards` 时，只刷新 `$PROJECT_ROOT/.understand-anything/product-index.json` manifest，不运行 LLM，不执行 Phase 1-5。直接运行：
+
+```bash
+node "$PLUGIN_ROOT/dist/product-index-cli.js" "$PROJECT_ROOT" --refresh-shards
+```
+
+运行完成后停止，并用中文说明已刷新 product shard manifest。
+
+如果项目存在 `.understand-anything/shards/`，但用户未传 `--shard <id>` 或 `--refresh-shards`，必须提示用户使用 `--shard <id>` 生成单个 product shard，或使用 `--refresh-shards` 刷新 manifest；不要默认加载所有 shards。
+
+分片模式仍按 Phase 1-5 执行，并且每个 CLI 阶段命令必须继续透传 `$ARGUMENTS`，使 `--shard <id>` 能传入 CLI。分片模式阶段文件路径为：
+
+```text
+$PROJECT_ROOT/.understand-anything/intermediate/product-shards/<id>/product-boundary-candidates.json
+$PROJECT_ROOT/.understand-anything/intermediate/product-shards/<id>/product-topic-normalization.json
+$PROJECT_ROOT/.understand-anything/intermediate/product-shards/<id>/product-context-packs.json
+$PROJECT_ROOT/.understand-anything/intermediate/product-shards/<id>/product-context-packs-by-topic/<topic-file>.json
+$PROJECT_ROOT/.understand-anything/intermediate/product-shards/<id>/product-index-extractions-by-topic/<topic-file>.json
+$PROJECT_ROOT/.understand-anything/product-shards/<id>.json
+$PROJECT_ROOT/.understand-anything/product-traces/<id>.json
+```
+
+如果 `$PROJECT_ROOT/.understand-anything/domain-shards/<id>.json` 缺失，product shard 生成不阻塞，只跳过 domain context；不要因此停止分片流程。
 
 ## Phase 1: Prepare Boundary Candidates
 
@@ -47,6 +77,8 @@ node "$PLUGIN_ROOT/dist/product-index-cli.js" "$PROJECT_ROOT" --prepare-candidat
 $PROJECT_ROOT/.understand-anything/knowledge-graph.json
 $PROJECT_ROOT/.understand-anything/domain-graph.json
 ```
+
+分片模式改为读取 `.understand-anything/shards/<id>.json`；如果存在 `.understand-anything/domain-shards/<id>.json` 则读取并加入 domain context，缺失时跳过 domain context。
 
 并写入：
 
@@ -160,6 +192,14 @@ $PROJECT_ROOT/.understand-anything/product-index-trace.json
 ```
 
 `product-index-trace.json` 必须保留 boundary candidates、topic normalization、context packs、extractions、discarded candidates、ignored files、overflow files 和 warnings。
+
+完成 `--finalize --shard <id>` 后，必须运行：
+
+```bash
+node "$PLUGIN_ROOT/dist/product-index-cli.js" "$PROJECT_ROOT" --refresh-shards
+```
+
+用 `--refresh-shards` 刷新 `.understand-anything/product-index.json` manifest，使新生成的 `$PROJECT_ROOT/.understand-anything/product-shards/<id>.json` 被索引。
 
 ## 完成输出
 

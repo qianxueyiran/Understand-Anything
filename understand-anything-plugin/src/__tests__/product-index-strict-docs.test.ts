@@ -25,6 +25,17 @@ describe("understand-product strict docs", () => {
     expect(skill).toContain("不要使用 `--fast`");
   });
 
+  it("documents sharded product prompt flow", () => {
+    expect(skill).toContain("--shard <id>");
+    expect(skill).toContain("--refresh-shards");
+    expect(skill).toContain("product-shards/<id>.json");
+    expect(skill).toContain("intermediate/product-shards/<id>");
+    expect(skill).toContain("product-traces/<id>.json");
+    expect(skill).toContain("--finalize --shard <id>");
+    expect(skill).toContain("完成 `--finalize --shard <id>` 后");
+    expect(skill).toContain("--refresh-shards` 刷新");
+  });
+
   it("requires topic normalization before context packs", () => {
     expect(normalizer).toContain("product-boundary-candidates.json");
     expect(normalizer).toContain("product-topic-normalization.json");
