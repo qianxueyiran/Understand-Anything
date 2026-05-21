@@ -263,7 +263,7 @@ $PROJECT_ROOT/.understand-anything/product-shards/<id>.json
 $PROJECT_ROOT/.understand-anything/product-traces/<id>.json
 ```
 
-`product-index-trace.json` 必须保留 boundary candidates、topic normalization、context packs、extractions、discarded candidates、ignored files、overflow files 和 warnings。
+非 shard 模式的 `product-index-trace.json` 和 shard 模式的 `product-traces/<id>.json` 都必须保留 boundary candidates、topic normalization、context packs、extractions、discarded candidates、ignored files、overflow files 和 warnings。
 
 完成 `--finalize --shard <id>` 后，必须运行：
 
