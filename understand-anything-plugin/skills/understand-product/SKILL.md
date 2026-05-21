@@ -47,7 +47,7 @@ node "$PLUGIN_ROOT/dist/product-index-cli.js" "$PROJECT_ROOT" --refresh-shards
 
 运行完成后停止，并用中文说明已刷新 product shard manifest。
 
-如果项目存在 `.understand-anything/shards/`，但用户未传 `--shard <id>` 或 `--refresh-shards`，必须提示用户使用 `--shard <id>` 生成单个 product shard，或使用 `--refresh-shards` 刷新 manifest；不要默认加载所有 shards。
+如果 `.understand-anything/knowledge-graph.json` 的顶层 `kind` 是 `codebase-sharded`，但用户未传 `--shard <id>` 或 `--refresh-shards`，必须提示用户使用 `--shard <id>` 生成单个 product shard，或使用 `--refresh-shards` 刷新 manifest；不要默认加载所有 shards。
 
 分片模式仍按 Phase 1-5 执行，并且每个 CLI 阶段命令必须继续透传 `$ARGUMENTS`，使 `--shard <id>` 能传入 CLI。分片模式阶段文件路径为：
 
