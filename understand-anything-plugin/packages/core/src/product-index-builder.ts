@@ -369,10 +369,18 @@ export function buildProductBoundaryCandidates(
   const patterns = compileEntryPatterns(graph, options);
   const adjacency = buildAdjacency(graph.edges);
   const maxNeighbors = options.maxNeighborNodeIds ?? DEFAULT_MAX_BOUNDARY_NEIGHBORS;
+  const nodesByFilePath = groupNodesByFilePath(graph.nodes);
 
   return graph.nodes
     .map((node) => {
-      const businessSignals = node.businessSignals ?? [];
+      if (node.type !== "file") {
+        return undefined;
+      }
+
+      const fileNodes = node.filePath ? (nodesByFilePath.get(node.filePath) ?? [node]) : [node];
+      const businessSignals = uniqueBusinessSignals(
+        fileNodes.flatMap((fileNode) => fileNode.businessSignals ?? []),
+      );
       const boundarySignals = businessSignals.filter((signal) => BOUNDARY_SIGNAL_TYPES.has(signal.type));
       const entryCandidate = isEntryCandidate(node, patterns);
       if (!entryCandidate && boundarySignals.length === 0) {
@@ -389,6 +397,12 @@ export function buildProductBoundaryCandidates(
         node.filePath,
         ...businessSignals.map((signal) => signal.text),
       ].filter(isString);
+      const neighborNodeIds = uniqueStrings([
+        ...fileNodes.filter((fileNode) => fileNode.id !== node.id).map((fileNode) => fileNode.id),
+        ...(adjacency.get(node.id) ?? [])
+          .sort((a, b) => b.weight - a.weight || a.nodeId.localeCompare(b.nodeId))
+          .map((neighbor) => neighbor.nodeId),
+      ]).slice(0, maxNeighbors);
 
       return {
         id: `candidate:${node.id}`,
@@ -397,11 +411,7 @@ export function buildProductBoundaryCandidates(
         entryKind,
         ...(node.filePath ? { filePath: node.filePath } : {}),
         businessSignals,
-        neighborNodeIds: uniqueStrings(
-          (adjacency.get(node.id) ?? [])
-            .sort((a, b) => b.weight - a.weight || a.nodeId.localeCompare(b.nodeId))
-            .map((neighbor) => neighbor.nodeId),
-        ).slice(0, maxNeighbors),
+        neighborNodeIds,
         domainRefs: collectDomainRefs(domainGraph, domainCandidates),
       } satisfies ProductBoundaryCandidate;
     })
@@ -1476,6 +1486,36 @@ function basenameWithoutExtension(filePath: string | undefined): string | undefi
 
   const basename = filePath.split(/[\\/]/u).pop();
   return basename?.replace(/\.[^.]+$/u, "");
+}
+
+function groupNodesByFilePath(nodes: GraphNode[]): Map<string, GraphNode[]> {
+  const groups = new Map<string, GraphNode[]>();
+  for (const node of nodes) {
+    if (!node.filePath) {
+      continue;
+    }
+
+    const group = groups.get(node.filePath) ?? [];
+    group.push(node);
+    groups.set(node.filePath, group);
+  }
+
+  return groups;
+}
+
+function uniqueBusinessSignals(
+  signals: NonNullable<GraphNode["businessSignals"]>,
+): NonNullable<GraphNode["businessSignals"]> {
+  const seen = new Set<string>();
+  return signals.filter((signal) => {
+    const key = `${signal.type}\u0000${signal.text}`;
+    if (seen.has(key)) {
+      return false;
+    }
+
+    seen.add(key);
+    return true;
+  });
 }
 
 function uniqueStrings<T extends string>(values: T[]): T[] {

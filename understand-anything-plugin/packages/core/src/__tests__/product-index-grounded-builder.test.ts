@@ -46,6 +46,13 @@ function graph(nodes: GraphNode[], edges: GraphEdge[] = []): KnowledgeGraph {
 }
 
 describe("grounded product index builder", () => {
+  const receiverFile = node({
+    id: "file:app/BootBroadcastReceiver.java",
+    type: "file",
+    name: "BootBroadcastReceiver.java",
+    filePath: "app/BootBroadcastReceiver.java",
+    summary: "Boot receiver source file.",
+  });
   const receiver = node({
     id: "class:BootBroadcastReceiver.java:BootBroadcastReceiver",
     name: "BootBroadcastReceiver",
@@ -83,10 +90,12 @@ describe("grounded product index builder", () => {
   });
 
   it("discovers product boundary candidates from graph businessSignals", () => {
-    const candidates = buildProductBoundaryCandidates(graph([receiver, onReceive, base]));
+    const candidates = buildProductBoundaryCandidates(graph([receiverFile, receiver, onReceive, base]));
 
-    expect(candidates.map((candidate) => candidate.rootNodeId)).toContain(receiver.id);
-    expect(candidates[0].businessSignals.map((signal) => signal.text)).toContain("开机广播接收入口");
+    expect(candidates.map((candidate) => candidate.rootNodeId)).toEqual([receiverFile.id]);
+    expect(candidates[0].businessSignals.map((signal) => signal.text)).toEqual(
+      expect.arrayContaining(["开机广播接收入口", "接收开机广播并启动后续处理"]),
+    );
   });
 
   it("builds compact topic context packs and keeps symbol anchors", () => {
