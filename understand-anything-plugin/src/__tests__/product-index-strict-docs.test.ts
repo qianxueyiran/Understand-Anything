@@ -14,6 +14,13 @@ const normalizer = readFileSync(
   "utf-8",
 );
 
+function skillPhase(title: string) {
+  const start = skill.indexOf(title);
+  expect(start).toBeGreaterThanOrEqual(0);
+  const next = skill.indexOf("\n## Phase ", start + title.length);
+  return next === -1 ? skill.slice(start) : skill.slice(start, next);
+}
+
 describe("understand-product strict docs", () => {
   it("documents strict phase order and removes fast fallback usage", () => {
     expect(skill).toContain("product-topic-normalizer.md");
@@ -34,6 +41,36 @@ describe("understand-product strict docs", () => {
     expect(skill).toContain("--finalize --shard <id>");
     expect(skill).toContain("完成 `--finalize --shard <id>` 后");
     expect(skill).toContain("--refresh-shards` 刷新");
+  });
+
+  it("documents shard-specific paths in each product phase", () => {
+    const phase1 = skillPhase("## Phase 1: Prepare Boundary Candidates");
+    expect(phase1).toContain("intermediate/product-shards/<id>/product-boundary-candidates.json");
+
+    const phase2 = skillPhase("## Phase 2: LLM Topic Normalization");
+    expect(phase2).toContain("intermediate/product-shards/<id>/product-boundary-candidates.json");
+    expect(phase2).toContain("intermediate/product-shards/<id>/product-topic-normalization.json");
+
+    const phase3 = skillPhase("## Phase 3: Build Context Packs");
+    expect(phase3).toContain("intermediate/product-shards/<id>/product-boundary-candidates.json");
+    expect(phase3).toContain("intermediate/product-shards/<id>/product-topic-normalization.json");
+    expect(phase3).toContain("shards/<id>.json");
+    expect(phase3).toContain("domain-shards/<id>.json");
+    expect(phase3).toContain("intermediate/product-shards/<id>/product-context-packs.json");
+    expect(phase3).toContain("intermediate/product-shards/<id>/product-context-packs-by-topic/<topic-file>.json");
+
+    const phase4 = skillPhase("## Phase 4: LLM Fact + Evidence Extraction");
+    expect(phase4).toContain("intermediate/product-shards/<id>/product-context-packs-by-topic/<topic-file>.json");
+    expect(phase4).toContain("intermediate/product-shards/<id>/product-index-extractions-by-topic/<topic-file>.json");
+
+    const phase5 = skillPhase("## Phase 5: Finalize Product Index");
+    expect(phase5).toContain("intermediate/product-shards/<id>/product-boundary-candidates.json");
+    expect(phase5).toContain("intermediate/product-shards/<id>/product-topic-normalization.json");
+    expect(phase5).toContain("intermediate/product-shards/<id>/product-context-packs.json");
+    expect(phase5).toContain("intermediate/product-shards/<id>/product-index-extractions-by-topic/*.json");
+    expect(phase5).toContain("product-shards/<id>.json");
+    expect(phase5).toContain("product-traces/<id>.json");
+    expect(phase5).toContain("--refresh-shards");
   });
 
   it("requires topic normalization before context packs", () => {

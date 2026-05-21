@@ -86,7 +86,15 @@ $PROJECT_ROOT/.understand-anything/domain-graph.json
 $PROJECT_ROOT/.understand-anything/intermediate/product-boundary-candidates.json
 ```
 
+`--shard <id>` 时写入：
+
+```text
+$PROJECT_ROOT/.understand-anything/intermediate/product-shards/<id>/product-boundary-candidates.json
+```
+
 阶段完成后必须检查文件存在。缺失则停止。
+
+`--shard <id>` 时必须检查 `$PROJECT_ROOT/.understand-anything/intermediate/product-shards/<id>/product-boundary-candidates.json` 存在。缺失则停止。
 
 ## Phase 2: LLM Topic Normalization
 
@@ -98,10 +106,22 @@ agent 必须读取：
 $PROJECT_ROOT/.understand-anything/intermediate/product-boundary-candidates.json
 ```
 
+`--shard <id>` 时 agent 必须读取：
+
+```text
+$PROJECT_ROOT/.understand-anything/intermediate/product-shards/<id>/product-boundary-candidates.json
+```
+
 并写入：
 
 ```text
 $PROJECT_ROOT/.understand-anything/intermediate/product-topic-normalization.json
+```
+
+`--shard <id>` 时 agent 必须写入：
+
+```text
+$PROJECT_ROOT/.understand-anything/intermediate/product-shards/<id>/product-topic-normalization.json
 ```
 
 输出必须包含：
@@ -113,6 +133,8 @@ $PROJECT_ROOT/.understand-anything/intermediate/product-topic-normalization.json
 Topic 必须是产品化主题，不是类名集合。agent 可以 keep、merge、drop candidates，但不能抽取 fact，不能选择 evidenceRefs，不能全项目搜索源码。
 
 阶段完成后必须检查 `product-topic-normalization.json` 存在。缺失则停止。
+
+`--shard <id>` 时必须检查 `$PROJECT_ROOT/.understand-anything/intermediate/product-shards/<id>/product-topic-normalization.json` 存在。缺失则停止。
 
 ## Phase 3: Build Context Packs
 
@@ -131,6 +153,17 @@ $PROJECT_ROOT/.understand-anything/knowledge-graph.json
 $PROJECT_ROOT/.understand-anything/domain-graph.json
 ```
 
+`--shard <id>` 时读取：
+
+```text
+$PROJECT_ROOT/.understand-anything/intermediate/product-shards/<id>/product-boundary-candidates.json
+$PROJECT_ROOT/.understand-anything/intermediate/product-shards/<id>/product-topic-normalization.json
+$PROJECT_ROOT/.understand-anything/shards/<id>.json
+$PROJECT_ROOT/.understand-anything/domain-shards/<id>.json
+```
+
+其中 `$PROJECT_ROOT/.understand-anything/domain-shards/<id>.json` 可选；缺失时跳过 domain context，不阻塞 product shard 生成。
+
 并写入：
 
 ```text
@@ -138,7 +171,16 @@ $PROJECT_ROOT/.understand-anything/intermediate/product-context-packs.json
 $PROJECT_ROOT/.understand-anything/intermediate/product-context-packs-by-topic/<topic-file>.json
 ```
 
+`--shard <id>` 时写入：
+
+```text
+$PROJECT_ROOT/.understand-anything/intermediate/product-shards/<id>/product-context-packs.json
+$PROJECT_ROOT/.understand-anything/intermediate/product-shards/<id>/product-context-packs-by-topic/<topic-file>.json
+```
+
 `product-context-packs.json` 保留完整审查链路；`product-context-packs-by-topic/` 是后续 fact analyzer 的逐 topic 输入。阶段完成后必须检查总文件和 per-topic 目录存在。缺失则停止。
+
+`--shard <id>` 时必须检查 `$PROJECT_ROOT/.understand-anything/intermediate/product-shards/<id>/product-context-packs.json` 和 `$PROJECT_ROOT/.understand-anything/intermediate/product-shards/<id>/product-context-packs-by-topic/` 存在。缺失则停止。
 
 ## Phase 4: LLM Fact + Evidence Extraction
 
@@ -150,10 +192,22 @@ $PROJECT_ROOT/.understand-anything/intermediate/product-context-packs-by-topic/<
 $PROJECT_ROOT/.understand-anything/intermediate/product-context-packs-by-topic/<topic-file>.json
 ```
 
+`--shard <id>` 时每个 agent 必须读取：
+
+```text
+$PROJECT_ROOT/.understand-anything/intermediate/product-shards/<id>/product-context-packs-by-topic/<topic-file>.json
+```
+
 并写入：
 
 ```text
 $PROJECT_ROOT/.understand-anything/intermediate/product-index-extractions-by-topic/<topic-file>.json
+```
+
+`--shard <id>` 时每个 agent 必须写入：
+
+```text
+$PROJECT_ROOT/.understand-anything/intermediate/product-shards/<id>/product-index-extractions-by-topic/<topic-file>.json
 ```
 
 单个 topic 输出必须是 JSON 对象：
@@ -165,6 +219,8 @@ $PROJECT_ROOT/.understand-anything/intermediate/product-index-extractions-by-top
 facts 必须包含 `type/text/conditions/evidenceRefs/confidence`，且 `evidenceRefs` 只能引用当前 per-topic context pack 中已有的 anchorId。不要派发 agent 全项目搜索，不要要求 agent 新增文件或 anchor。
 
 阶段完成后必须检查 `product-index-extractions-by-topic/` 下每个 topic 都有对应 JSON。缺失则停止。
+
+`--shard <id>` 时必须检查 `$PROJECT_ROOT/.understand-anything/intermediate/product-shards/<id>/product-index-extractions-by-topic/` 下每个 topic 都有对应 JSON。缺失则停止。
 
 ## Phase 5: Finalize Product Index
 
@@ -183,12 +239,28 @@ $PROJECT_ROOT/.understand-anything/intermediate/product-context-packs.json
 $PROJECT_ROOT/.understand-anything/intermediate/product-index-extractions-by-topic/*.json
 ```
 
+`--shard <id>` 时读取：
+
+```text
+$PROJECT_ROOT/.understand-anything/intermediate/product-shards/<id>/product-boundary-candidates.json
+$PROJECT_ROOT/.understand-anything/intermediate/product-shards/<id>/product-topic-normalization.json
+$PROJECT_ROOT/.understand-anything/intermediate/product-shards/<id>/product-context-packs.json
+$PROJECT_ROOT/.understand-anything/intermediate/product-shards/<id>/product-index-extractions-by-topic/*.json
+```
+
 并写入：
 
 ```text
 $PROJECT_ROOT/.understand-anything/intermediate/product-index-extractions.json
 $PROJECT_ROOT/.understand-anything/product-index.json
 $PROJECT_ROOT/.understand-anything/product-index-trace.json
+```
+
+`--shard <id>` 时写入：
+
+```text
+$PROJECT_ROOT/.understand-anything/product-shards/<id>.json
+$PROJECT_ROOT/.understand-anything/product-traces/<id>.json
 ```
 
 `product-index-trace.json` 必须保留 boundary candidates、topic normalization、context packs、extractions、discarded candidates、ignored files、overflow files 和 warnings。
