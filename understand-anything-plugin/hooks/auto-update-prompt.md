@@ -13,26 +13,39 @@ Incrementally update the knowledge graph using deterministic structural fingerpr
 2. Check that `$PROJECT_ROOT/.understand-anything/knowledge-graph.json` exists.
    - If not: report "No existing knowledge graph found. Run `/understand` first to create one." and **STOP**.
 
-3. Check that `$PROJECT_ROOT/.understand-anything/meta.json` exists and read `gitCommitHash`.
+3. 在检查 `meta.json` 之前，以 raw JSON 读取 `$PROJECT_ROOT/.understand-anything/knowledge-graph.json` 并检查 top-level `kind`。
+
+   如果 `kind === "codebase-sharded"`：
+   1. 将本 hook 视为等价于 `/understand --update-diff`。
+   2. 读取 `knowledge-graph.json.update.gitCommitHash`；如果缺失，则根据现有 `shards[]` 构建 baseline update metadata。
+   3. 执行一次全局 diff：
+      ```bash
+      git diff <lastCommitHash>..HEAD --name-only
+      ```
+   4. 使用 sharded file-level incremental update patch 所有受影响 code shards。
+   5. 默认不要重建 domain/product；只有未来配置项 `autoUpdateDomain` 或 `autoUpdateProduct` 明确为 true 时才执行对应下游重建。
+   6. 保存 manifest `update` metadata 后 **STOP**。不要进入非分片 `meta.json` / `fingerprints.json` 路径。
+
+4. Check that `$PROJECT_ROOT/.understand-anything/meta.json` exists and read `gitCommitHash`.
    - If not: report "No analysis metadata found. Run `/understand` to create a baseline." and **STOP**.
 
-4. Get current commit hash:
+5. Get current commit hash:
    ```bash
    git rev-parse HEAD
    ```
 
-5. If commit hashes match and `--force` is NOT in `$ARGUMENTS`: report "Knowledge graph is already up to date." and **STOP**.
+6. If commit hashes match and `--force` is NOT in `$ARGUMENTS`: report "Knowledge graph is already up to date." and **STOP**.
 
-6. Get changed files:
+7. Get changed files:
    ```bash
    git diff <lastCommitHash>..HEAD --name-only
    ```
    If no files changed: update `meta.json` with the new commit hash and **STOP**.
 
-7. Filter to source files only (`.ts`, `.tsx`, `.js`, `.jsx`, `.py`, `.go`, `.rs`, `.java`, `.rb`, `.cpp`, `.c`, `.h`, `.cs`, `.swift`, `.kt`, `.php`).
+8. Filter to source files only (`.ts`, `.tsx`, `.js`, `.jsx`, `.py`, `.go`, `.rs`, `.java`, `.rb`, `.cpp`, `.c`, `.h`, `.cs`, `.swift`, `.kt`, `.php`).
    If no source files changed: update `meta.json` with the new commit hash, report "Only non-source files changed. Metadata updated." and **STOP**.
 
-8. Create intermediate directory:
+9. Create intermediate directory:
    ```bash
    mkdir -p $PROJECT_ROOT/.understand-anything/intermediate
    ```

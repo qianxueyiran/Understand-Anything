@@ -1,7 +1,7 @@
 ---
 name: understand
 description: Analyze a codebase to produce an interactive knowledge graph for understanding architecture, components, and relationships
-argument-hint: ["[path] [--full|--auto-update|--no-auto-update|--review|--language <lang>|--scope <paths>|--shard <id>]"]
+argument-hint: ["[path] [--full|--update-diff|--with-domain|--with-product|--auto-update|--no-auto-update|--review|--language <lang>|--scope <paths>|--shard <id>]"]
 ---
 
 # /understand
@@ -19,6 +19,9 @@ Analyze the current codebase and produce a `knowledge-graph.json` file in `.unde
 
 - `$ARGUMENTS` may contain:
   - `--full` — Force a full rebuild, ignoring any existing graph
+  - `--update-diff` — 显式根据 git diff 更新既有 graph。普通 `knowledge-graph.json` 复用现有非分片增量路径；当根 graph 为 `kind: "codebase-sharded"` 时，执行 sharded file-level incremental（分片文件级增量）并一次性更新所有受影响 shards。
+  - `--with-domain` — 仅在 sharded 项目使用 `--update-diff` 时有效。只重建 code shard artifact hash 发生变化的对应 domain shards。
+  - `--with-product` — 仅在 sharded 项目使用 `--update-diff` 时有效。只重建 code shard artifact hash 发生变化的对应 product shards。
   - `--auto-update` — Enable automatic graph updates on commit (writes `autoUpdate: true` to `.understand-anything/config.json`)
   - `--no-auto-update` — Disable automatic graph updates (writes `autoUpdate: false` to `.understand-anything/config.json`)
   - `--review` — Run full LLM graph-reviewer instead of inline deterministic validation
@@ -169,6 +172,8 @@ Determine whether to run a full analysis or incremental update.
    |---|---|
    | `SCOPED_SHARD_MODE=true` | Always run scoped full analysis for the requested scope roots. Ignore existing main `knowledge-graph.json` / `meta.json` state for unchanged, incremental, and review-only decisions. `--review` does not change this scoped shard rebuild decision; it only controls whether Phase 6 uses the LLM reviewer. |
    | `--full` flag in `$ARGUMENTS` | Full analysis (all phases) |
+   | `--update-diff` + existing graph `kind !== "codebase-sharded"` | Existing non-sharded incremental update path |
+   | `--update-diff` + existing graph `kind === "codebase-sharded"` | Sharded file-level incremental update. Compute one global git diff, map changed files to affected shards, patch every affected shard, refresh manifests, and advance `knowledge-graph.json.update.gitCommitHash` only after all requested work succeeds. |
    | No existing graph or meta | Full analysis (all phases) |
    | `--review` flag + existing graph + unchanged commit hash | Skip to Phase 6 (review-only — reuse existing assembled graph) |
    | Existing graph + unchanged commit hash | Ask the user: "The graph is up to date at this commit. Would you like to: **(a)** run a full rebuild (`--full`), **(b)** run the LLM graph reviewer (`--review`), or **(c)** do nothing?" Then follow their choice. If they pick (c), STOP. |
@@ -376,6 +381,29 @@ After batches complete:
    ```bash
    python <SKILL_DIR>/merge-batch-graphs.py $PROJECT_ROOT
    ```
+
+### Sharded file-level incremental update path
+
+此路径仅在 `$ARGUMENTS` 包含 `--update-diff`，并且根 `$PROJECT_ROOT/.understand-anything/knowledge-graph.json` 的 `kind` 为 `codebase-sharded` 时适用。它不逐个 shard 手动触发命令，而是在一次流程里计算全局 diff、识别所有受影响 shard，并统一推进 manifest 状态。
+
+1. 读取 `knowledge-graph.json.update.gitCommitHash`。如果缺失，先根据现有 `shards[]` 构建 baseline update metadata，然后继续。
+2. 执行一次全局 diff：
+   ```bash
+   git diff <lastCommitHash>..HEAD --name-only
+   ```
+3. 用 `shards[].scopes` 将 changed files 映射到 affected shards；对删除或移动后 scope 命不中的文件，回退读取旧 shard graph 的 `nodes[*].filePath`。
+4. 对每个 affected shard，读取 `.understand-anything/fingerprints/shards/<id>.json`，并按文件级 fingerprint 区分 cosmetic 与 structural change。
+5. cosmetic-only shard 只更新 fingerprint content hash，不调用 LLM 分析。
+6. structural shard 仅对 structural files 调用 `file-analyzer`。
+7. 将旧 shard 中受影响文件对应的 nodes/edges 剪除后写入 `batch-existing.json`，然后运行：
+   ```bash
+   python <SKILL_DIR>/merge-batch-graphs.py $PROJECT_ROOT --allow-external-edges
+   ```
+8. 对 patched shard 重新运行 architecture/tour 阶段，并保存到 `.understand-anything/shards/<id>.json`。
+9. 刷新根 `knowledge-graph.json`，并保留其中已有的 `update` 字段。
+10. 如果传入 `--with-domain`，只对 code shard artifact hash 发生变化的对应 domain shards 执行“受影响 shard 重建”。
+11. 如果传入 `--with-product`，只对 code shard artifact hash 发生变化的对应 product shards 执行“受影响 shard 重建”。
+12. 只有当本次请求的 code/domain/product 更新全部成功后，才推进 `knowledge-graph.json.update.gitCommitHash` 到当前 HEAD。
 
 ---
 
