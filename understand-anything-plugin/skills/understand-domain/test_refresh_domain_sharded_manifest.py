@@ -74,6 +74,36 @@ class RefreshDomainShardedManifestTest(unittest.TestCase):
             )
             self.assertTrue(any("bad.name.json" in warning for warning in manifest["warnings"]))
 
+    def test_refresh_manifest_preserves_existing_update_metadata(self):
+        refresh_manifest = load_refresh_manifest()
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            understand_dir = root / ".understand-anything"
+            shard_dir = understand_dir / "domain-shards"
+            shard_dir.mkdir(parents=True)
+            (shard_dir / "home.json").write_text("{}", encoding="utf-8")
+            update = {
+                "updatedAt": "2026-05-21T00:00:00.000Z",
+                "shards": {
+                    "home": {
+                        "artifactHash": "sha256:domain",
+                        "sourceCodeArtifactHash": "sha256:code",
+                    }
+                },
+                "warnings": ["kept"],
+            }
+            (understand_dir / "domain-graph.json").write_text(
+                json.dumps({"version": "1.0.0", "kind": "domain-sharded", "update": update}),
+                encoding="utf-8",
+            )
+
+            manifest = refresh_manifest(root)
+
+            self.assertEqual(manifest["update"], update)
+            saved = json.loads((understand_dir / "domain-graph.json").read_text(encoding="utf-8"))
+            self.assertEqual(saved["update"], update)
+
 
 if __name__ == "__main__":
     unittest.main()

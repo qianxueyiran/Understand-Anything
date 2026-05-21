@@ -256,6 +256,23 @@ describe("product-index CLI", () => {
       join(testRoot, ".understand-anything", "domain-shards", "home.json"),
       { domain: true },
     );
+    const update = {
+      updatedAt: "2026-05-21T00:00:00.000Z",
+      shards: {
+        home: {
+          artifactHash: "sha256:product",
+          traceArtifactHash: "sha256:trace",
+          sourceCodeArtifactHash: "sha256:code",
+          sourceDomainArtifactHash: "sha256:domain",
+        },
+      },
+      warnings: ["kept"],
+    };
+    writeJson(join(testRoot, ".understand-anything", "product-index.json"), {
+      version: "1.0.0",
+      kind: "product-sharded",
+      update,
+    });
 
     await runProductIndexCli([testRoot, "--refresh-shards"]);
 
@@ -274,6 +291,7 @@ describe("product-index CLI", () => {
         sourceDomainShard?: string;
       }>;
       warnings: string[];
+      update?: typeof update;
     };
     expect(productIndex.kind).toBe("product-sharded");
     expect(productIndex.shards).toEqual([
@@ -293,9 +311,37 @@ describe("product-index CLI", () => {
     expect(productIndex.warnings).toContain(
       "product-shards/player.json has no matching product-traces/player.json",
     );
+    expect(productIndex.update).toEqual(update);
     expect(JSON.stringify(productIndex)).not.toMatch(
       /topicCount|factCount|evidenceCount|signalsCount|contextPacksCount|coverage|quality/,
     );
+  });
+
+  it("refreshes the product sharded manifest when the existing manifest is malformed", async () => {
+    mkdirSync(join(testRoot, ".understand-anything", "product-shards"), {
+      recursive: true,
+    });
+    writeFileSync(
+      join(testRoot, ".understand-anything", "product-shards", "home.json"),
+      "{not json",
+      "utf-8",
+    );
+    writeFileSync(
+      join(testRoot, ".understand-anything", "product-index.json"),
+      "{bad manifest",
+      "utf-8",
+    );
+
+    await runProductIndexCli([testRoot, "--refresh-shards"]);
+
+    const productIndex = JSON.parse(
+      readFileSync(
+        join(testRoot, ".understand-anything", "product-index.json"),
+        "utf-8",
+      ),
+    ) as { kind: string; update?: unknown };
+    expect(productIndex.kind).toBe("product-sharded");
+    expect(productIndex.update).toBeUndefined();
   });
 
   it("finalizes a product shard and refreshes the root product manifest", async () => {

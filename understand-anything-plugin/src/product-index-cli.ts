@@ -13,6 +13,7 @@ import {
   loadGraph,
   saveProductIndex,
   type KnowledgeGraph,
+  type ManifestUpdateMetadata,
   type ProductSignal,
   type ProductProfileOptions,
 } from "@understand-anything/core";
@@ -346,14 +347,35 @@ function loadProductGraphInputs(
 
 function refreshProductShardedManifest(projectRoot: string): string {
   const understandDir = join(projectRoot, ".understand-anything");
+  const productIndexPath = getProductIndexPath(projectRoot);
   const manifest = buildProductShardedManifest({
     productShardFiles: listJsonFileNames(join(understandDir, "product-shards")),
     domainShardFiles: listJsonFileNames(join(understandDir, "domain-shards")),
     traceFiles: listJsonFileNames(join(understandDir, "product-traces")),
+    update: readExistingManifestUpdate(productIndexPath),
   });
-  const productIndexPath = getProductIndexPath(projectRoot);
   writeJson(productIndexPath, manifest);
   return productIndexPath;
+}
+
+function readExistingManifestUpdate(path: string): ManifestUpdateMetadata | undefined {
+  if (!existsSync(path)) {
+    return undefined;
+  }
+
+  let data: unknown;
+  try {
+    data = JSON.parse(readFileSync(path, "utf-8"));
+  } catch {
+    return undefined;
+  }
+  if (data === null || typeof data !== "object") {
+    return undefined;
+  }
+  const update = (data as { update?: unknown }).update;
+  return update && typeof update === "object"
+    ? (update as ManifestUpdateMetadata)
+    : undefined;
 }
 
 function writeProductIndexTrace(

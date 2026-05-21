@@ -12,6 +12,8 @@ def refresh_manifest(project_root):
     root = Path(project_root)
     understand_dir = root / ".understand-anything"
     shard_dir = understand_dir / "domain-shards"
+    manifest_path = understand_dir / "domain-graph.json"
+    existing_update = read_existing_update(manifest_path)
     shards = []
     warnings = []
 
@@ -35,11 +37,25 @@ def refresh_manifest(project_root):
         "shards": shards,
         "warnings": warnings,
     }
+    if existing_update is not None:
+        manifest["update"] = existing_update
 
     understand_dir.mkdir(parents=True, exist_ok=True)
-    manifest_path = understand_dir / "domain-graph.json"
     manifest_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
     return manifest
+
+
+def read_existing_update(manifest_path):
+    if not manifest_path.exists():
+        return None
+    try:
+        data = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    if not isinstance(data, dict):
+        return None
+    update = data.get("update")
+    return update if isinstance(update, dict) else None
 
 
 def main(argv):
