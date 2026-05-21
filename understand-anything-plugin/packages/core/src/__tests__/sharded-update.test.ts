@@ -189,6 +189,104 @@ describe("affected shard detection", () => {
     expect(plan.affectedCodeShards[0].id).toBe("home");
     expect(plan.affectedCodeShards[0].reason).toBe("changed file matched existing shard node");
   });
+
+  it("skips invalid shard metadata when planning affected shards", () => {
+    const plan = buildAffectedShardPlan({
+      manifest: {
+        ...manifest,
+        shards: [
+          { id: "../bad", path: "shards/../bad.json", scopes: ["a_home"] },
+          { id: "player", path: "shards/../../player.json", scopes: ["a_player"] },
+          { id: "home", path: "shards/home.json", scopes: ["a_home"] },
+        ],
+      },
+      changedFiles: ["a_home/src/Home.kt", "a_player/src/Player.kt"],
+      knownShardGraphs: {},
+      sourceFileExtensions: [".kt"],
+    });
+
+    expect(plan.affectedCodeShards).toEqual([
+      {
+        id: "home",
+        path: "shards/home.json",
+        scopes: ["a_home"],
+        changedFiles: ["a_home/src/Home.kt"],
+        structuralFiles: [],
+        cosmeticFiles: [],
+        deletedFiles: [],
+        reason: "changed file matched shard scope",
+      },
+    ]);
+    expect(plan.unmappedChangedFiles).toEqual(["a_player/src/Player.kt"]);
+    expect(plan.warnings).toEqual([
+      "Skipped invalid shard id: ../bad",
+      "Skipped invalid shard metadata for player: expected path shards/player.json",
+      "a_player/src/Player.kt did not match any shard",
+    ]);
+  });
+
+  it("deduplicates repeated changed files in affected plans and warnings", () => {
+    const plan = buildAffectedShardPlan({
+      manifest,
+      changedFiles: [
+        "a_home/src/Home.kt",
+        "README.md",
+        "a_home/src/Home.kt",
+        "README.md",
+        "unowned/src/Feature.kt",
+        "unowned/src/Feature.kt",
+      ],
+      knownShardGraphs: {},
+      sourceFileExtensions: [".kt"],
+    });
+
+    expect(plan.changedFiles).toEqual([
+      "a_home/src/Home.kt",
+      "README.md",
+      "unowned/src/Feature.kt",
+    ]);
+    expect(plan.affectedCodeShards[0].changedFiles).toEqual(["a_home/src/Home.kt"]);
+    expect(plan.unmappedChangedFiles).toEqual(["unowned/src/Feature.kt"]);
+    expect(plan.warnings).toEqual([
+      "README.md did not match any shard",
+      "unowned/src/Feature.kt did not match any shard",
+    ]);
+  });
+
+  it("does not match sibling scope prefixes without a path boundary", () => {
+    const plan = buildAffectedShardPlan({
+      manifest,
+      changedFiles: ["a_home2/src/Home.kt"],
+      knownShardGraphs: {},
+      sourceFileExtensions: [".kt"],
+    });
+
+    expect(plan.affectedCodeShards).toEqual([]);
+    expect(plan.unmappedChangedFiles).toEqual(["a_home2/src/Home.kt"]);
+    expect(plan.warnings).toEqual(["a_home2/src/Home.kt did not match any shard"]);
+  });
+
+  it("maps one changed file to multiple matching shard scopes in manifest order", () => {
+    const plan = buildAffectedShardPlan({
+      manifest: {
+        ...manifest,
+        shards: [
+          { id: "home", path: "shards/home.json", scopes: ["a_home"] },
+          { id: "home-ui", path: "shards/home-ui.json", scopes: ["a_home/src"] },
+          { id: "player", path: "shards/player.json", scopes: ["a_player"] },
+        ],
+      },
+      changedFiles: ["a_home/src/Home.kt"],
+      knownShardGraphs: {},
+      sourceFileExtensions: [".kt"],
+    });
+
+    expect(plan.affectedCodeShards.map((shard) => shard.id)).toEqual(["home", "home-ui"]);
+    expect(plan.affectedCodeShards.map((shard) => shard.changedFiles)).toEqual([
+      ["a_home/src/Home.kt"],
+      ["a_home/src/Home.kt"],
+    ]);
+  });
 });
 
 describe("shard graph prune", () => {

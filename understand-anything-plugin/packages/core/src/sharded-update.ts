@@ -47,14 +47,11 @@ export function hashArtifactFile(path: string): string {
   return `sha256:${createHash("sha256").update(content).digest("hex")}`;
 }
 
-export function buildCodeManifestUpdate(
-  projectRoot: string,
+function getValidManifestShards(
   manifest: CodebaseShardedManifest,
-  gitCommitHash: string,
-  now = new Date().toISOString(),
-): ManifestUpdateMetadata {
-  const warnings: string[] = [];
-  const shards: Record<string, ShardUpdateMetadata> = {};
+  warnings: string[],
+): CodebaseShardedManifestShard[] {
+  const validShards: CodebaseShardedManifestShard[] = [];
 
   for (const shard of manifest.shards) {
     if (!SHARD_ID_PATTERN.test(shard.id)) {
@@ -70,6 +67,22 @@ export function buildCodeManifestUpdate(
       continue;
     }
 
+    validShards.push(shard);
+  }
+
+  return validShards;
+}
+
+export function buildCodeManifestUpdate(
+  projectRoot: string,
+  manifest: CodebaseShardedManifest,
+  gitCommitHash: string,
+  now = new Date().toISOString(),
+): ManifestUpdateMetadata {
+  const warnings: string[] = [];
+  const shards: Record<string, ShardUpdateMetadata> = {};
+
+  for (const shard of getValidManifestShards(manifest, warnings)) {
     const shardPath = join(projectRoot, ".understand-anything", shard.path);
     if (!existsSync(shardPath)) {
       warnings.push(`${shard.path} is missing; update metadata skipped`);
@@ -129,16 +142,18 @@ export function buildAffectedShardPlan(input: AffectedShardPlanInput): ShardedUp
   const affected = new Map<string, AffectedCodeShard>();
   const unmappedChangedFiles: string[] = [];
   const warnings: string[] = [];
+  const changedFiles = [...new Set(input.changedFiles)];
+  const shards = getValidManifestShards(input.manifest, warnings);
 
-  for (const filePath of input.changedFiles) {
-    const matches = input.manifest.shards.filter((shard) =>
+  for (const filePath of changedFiles) {
+    const matches = shards.filter((shard) =>
       (shard.scopes ?? []).some((scope) => filePath === scope || filePath.startsWith(`${scope}/`)),
     );
 
     const fallbackMatches =
       matches.length > 0
         ? []
-        : input.manifest.shards.filter((shard) =>
+        : shards.filter((shard) =>
             (input.knownShardGraphs[shard.id]?.nodes ?? []).some(
               (node) => node.filePath === filePath,
             ),
@@ -177,7 +192,7 @@ export function buildAffectedShardPlan(input: AffectedShardPlanInput): ShardedUp
   }
 
   return {
-    changedFiles: input.changedFiles,
+    changedFiles,
     affectedCodeShards: [...affected.values()],
     unmappedChangedFiles,
     warnings,
