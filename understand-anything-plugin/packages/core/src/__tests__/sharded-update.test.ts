@@ -1,15 +1,18 @@
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { rmSync } from "node:fs";
-import { describe, expect, it, afterEach } from "vitest";
+import { describe, expect, it, afterEach, beforeEach } from "vitest";
 import {
   buildCodeManifestUpdate,
   hashArtifactFile,
   type CodebaseShardedManifest,
 } from "../sharded-update.js";
 
-const root = join(tmpdir(), "ua-sharded-update-test");
+let root: string;
+
+beforeEach(() => {
+  root = mkdtempSync(join(tmpdir(), "ua-sharded-update-test-"));
+});
 
 afterEach(() => {
   rmSync(root, { recursive: true, force: true });
@@ -58,5 +61,54 @@ describe("sharded update manifest metadata", () => {
     expect(update.shards.home.fingerprintPath).toBe("fingerprints/shards/home.json");
     expect(update.shards.home.artifactHash).toMatch(/^sha256:/);
     expect(update.warnings).toEqual([]);
+  });
+
+  it("skips shard metadata with paths outside the expected shard file", () => {
+    mkdirSync(join(root, ".understand-anything", "shards"), { recursive: true });
+    writeFileSync(
+      join(root, ".understand-anything", "shards", "home.json"),
+      JSON.stringify({ nodes: [{ id: "file:a_home/Home.kt" }], edges: [] }),
+      "utf-8",
+    );
+
+    const manifest: CodebaseShardedManifest = {
+      version: "1.0.0",
+      kind: "codebase-sharded",
+      shards: [
+        {
+          id: "home",
+          path: "shards/../../outside.json",
+        },
+      ],
+      warnings: [],
+    };
+
+    const update = buildCodeManifestUpdate(root, manifest, "abc123");
+
+    expect(update.shards).toEqual({});
+    expect(update.warnings).toEqual([
+      "Skipped invalid shard metadata for home: expected path shards/home.json",
+    ]);
+  });
+
+  it("skips shard metadata with invalid shard ids", () => {
+    mkdirSync(join(root, ".understand-anything", "shards"), { recursive: true });
+
+    const manifest: CodebaseShardedManifest = {
+      version: "1.0.0",
+      kind: "codebase-sharded",
+      shards: [
+        {
+          id: "../bad",
+          path: "shards/../bad.json",
+        },
+      ],
+      warnings: [],
+    };
+
+    const update = buildCodeManifestUpdate(root, manifest, "abc123");
+
+    expect(update.shards).toEqual({});
+    expect(update.warnings).toEqual(["Skipped invalid shard id: ../bad"]);
   });
 });

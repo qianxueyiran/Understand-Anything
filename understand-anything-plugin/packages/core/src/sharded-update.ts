@@ -2,6 +2,8 @@ import { createHash } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
+const SHARD_ID_PATTERN = /^[A-Za-z0-9_-]+$/;
+
 export interface CodebaseShardedManifestShard {
   id: string;
   path: string;
@@ -54,6 +56,19 @@ export function buildCodeManifestUpdate(
   const shards: Record<string, ShardUpdateMetadata> = {};
 
   for (const shard of manifest.shards) {
+    if (!SHARD_ID_PATTERN.test(shard.id)) {
+      warnings.push(`Skipped invalid shard id: ${shard.id}`);
+      continue;
+    }
+
+    const expectedShardPath = `shards/${shard.id}.json`;
+    if (shard.path !== expectedShardPath) {
+      warnings.push(
+        `Skipped invalid shard metadata for ${shard.id}: expected path ${expectedShardPath}`,
+      );
+      continue;
+    }
+
     const shardPath = join(projectRoot, ".understand-anything", shard.path);
     if (!existsSync(shardPath)) {
       warnings.push(`${shard.path} is missing; update metadata skipped`);
