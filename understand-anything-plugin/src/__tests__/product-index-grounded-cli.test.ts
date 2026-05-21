@@ -21,6 +21,15 @@ function writeGraph(projectRoot: string): void {
     },
     nodes: [
       {
+        id: "file:app/BootBroadcastReceiver.java",
+        type: "file",
+        name: "BootBroadcastReceiver.java",
+        filePath: "app/BootBroadcastReceiver.java",
+        summary: "Boot receiver source file.",
+        tags: ["receiver"],
+        complexity: "simple",
+      },
+      {
         id: "function:BootBroadcastReceiver.java:onReceive",
         type: "function",
         name: "onReceive",
@@ -34,7 +43,15 @@ function writeGraph(projectRoot: string): void {
         ],
       },
     ],
-    edges: [],
+    edges: [
+      {
+        source: "file:app/BootBroadcastReceiver.java",
+        target: "function:BootBroadcastReceiver.java:onReceive",
+        type: "contains",
+        direction: "forward",
+        weight: 1,
+      },
+    ],
     layers: [],
     tour: [],
   };

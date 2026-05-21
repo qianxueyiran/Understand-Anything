@@ -90,6 +90,21 @@ export async function runProductIndexCli(
     maxFrontierPerDepth: options.maxFrontierPerDepth,
     maxEvidencePerTopic: options.maxEvidencePerTopic,
     hubDegreeThreshold: options.hubDegreeThreshold,
+    sourcePaths: options.shardId
+      ? {
+          knowledgeGraph: `.understand-anything/shards/${options.shardId}.json`,
+          domainGraph: existsSync(
+            join(
+              options.projectRoot,
+              ".understand-anything",
+              "domain-shards",
+              `${options.shardId}.json`,
+            ),
+          )
+            ? `.understand-anything/domain-shards/${options.shardId}.json`
+            : undefined,
+        }
+      : undefined,
   };
 
   const signals = sanitiseProductSignals(

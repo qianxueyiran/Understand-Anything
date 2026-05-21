@@ -22,6 +22,10 @@ export interface ProductProfileOptions {
   maxFrontierPerDepth?: number;
   maxEvidencePerTopic?: number;
   hubDegreeThreshold?: number;
+  sourcePaths?: {
+    knowledgeGraph: string;
+    domainGraph?: string;
+  };
 }
 
 export interface ProductEntrySeed {
@@ -602,6 +606,8 @@ export function finalizeGroundedProductIndex(input: FinalizeGroundedProductIndex
   ]);
   const evidence = Array.from(evidenceById.values()).filter((item) => outputEvidenceIds.has(item.id));
   const outputFacts = outputTopics.flatMap((topic) => topic.facts);
+  const knowledgeGraphPath =
+    options.sourcePaths?.knowledgeGraph ?? ".understand-anything/knowledge-graph.json";
   if (input.warningsSink) {
     input.warningsSink.splice(0, input.warningsSink.length, ...warnings);
   }
@@ -619,10 +625,17 @@ export function finalizeGroundedProductIndex(input: FinalizeGroundedProductIndex
     },
     sources: {
       knowledgeGraph: {
-        path: ".understand-anything/knowledge-graph.json",
+        path: knowledgeGraphPath,
         gitCommitHash: graph.project.gitCommitHash,
         required: true,
       },
+      domainGraph: options.sourcePaths?.domainGraph
+        ? {
+            path: options.sourcePaths.domainGraph,
+            available: true,
+            required: false,
+          }
+        : undefined,
     },
     topics: outputTopics,
     evidence,
@@ -649,6 +662,10 @@ export function buildDeterministicProductIndex(
   const analyzedAt = options.analyzedAt ?? graph.project.analyzedAt;
   const seeds = enumerateProductEntrySeeds(graph, options);
   const signals = buildProductSignals(graph, options);
+  const knowledgeGraphPath =
+    options.sourcePaths?.knowledgeGraph ?? ".understand-anything/knowledge-graph.json";
+  const domainGraphPath =
+    options.sourcePaths?.domainGraph ?? ".understand-anything/domain-graph.json";
   const signalByNodeId = groupSignalsByNodeId(signals);
   const nodeById = new Map(graph.nodes.map((node) => [node.id, node]));
   const adjacency = buildAdjacency(graph.edges);
@@ -727,13 +744,13 @@ export function buildDeterministicProductIndex(
     },
     sources: {
       knowledgeGraph: {
-        path: ".understand-anything/knowledge-graph.json",
+        path: knowledgeGraphPath,
         gitCommitHash: graph.project.gitCommitHash,
         required: true,
       },
       domainGraph: domainGraph
         ? {
-            path: ".understand-anything/domain-graph.json",
+            path: domainGraphPath,
             available: true,
             required: false,
           }

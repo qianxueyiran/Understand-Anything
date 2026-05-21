@@ -32,9 +32,27 @@ const graph: KnowledgeGraph = {
       summary: "播放页 Activity，包含投屏入口。",
       tags: ["activity", "player", "cast"],
       complexity: "moderate",
+      businessSignals: [{ type: "behavior", text: "播放页提供投屏入口" }],
+    },
+    {
+      id: "file:player/PlayerActivity.kt",
+      type: "file",
+      name: "PlayerActivity.kt",
+      filePath: "player/PlayerActivity.kt",
+      summary: "播放页文件。",
+      tags: ["activity", "player"],
+      complexity: "simple",
     },
   ],
-  edges: [],
+  edges: [
+    {
+      source: "file:player/PlayerActivity.kt",
+      target: "class:player/PlayerActivity.kt:PlayerActivity",
+      type: "contains",
+      direction: "forward",
+      weight: 1,
+    },
+  ],
   layers: [],
   tour: [],
 };
@@ -289,8 +307,13 @@ describe("product-index CLI", () => {
           ...graph.nodes[0],
           businessSignals: [{ type: "behavior", text: "播放页提供投屏入口" }],
         },
+        graph.nodes[1],
       ],
     });
+    writeJson(
+      join(testRoot, ".understand-anything", "domain-shards", "home.json"),
+      graph,
+    );
     await runProductIndexCli([
       testRoot,
       "--platform",
@@ -393,6 +416,23 @@ describe("product-index CLI", () => {
     expect(
       existsSync(join(testRoot, ".understand-anything", "product-traces", "home.json")),
     ).toBe(true);
+    const productIndex = JSON.parse(
+      readFileSync(
+        join(testRoot, ".understand-anything", "product-shards", "home.json"),
+        "utf-8",
+      ),
+    ) as {
+      sources: {
+        knowledgeGraph: { path: string };
+        domainGraph?: { path: string };
+      };
+    };
+    expect(productIndex.sources.knowledgeGraph.path).toBe(
+      ".understand-anything/shards/home.json",
+    );
+    expect(productIndex.sources.domainGraph?.path).toBe(
+      ".understand-anything/domain-shards/home.json",
+    );
     const productManifest = JSON.parse(
       readFileSync(join(testRoot, ".understand-anything", "product-index.json"), "utf-8"),
     ) as { kind: string; shards: Array<{ id: string; path: string; tracePath?: string }> };
@@ -402,6 +442,7 @@ describe("product-index CLI", () => {
         id: "home",
         path: "product-shards/home.json",
         sourceCodeShard: "shards/home.json",
+        sourceDomainShard: "domain-shards/home.json",
         tracePath: "product-traces/home.json",
       },
     ]);
