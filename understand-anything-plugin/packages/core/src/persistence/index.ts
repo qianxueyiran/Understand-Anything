@@ -138,6 +138,7 @@ export function loadFingerprints(projectRoot: string): FingerprintStore | null {
 }
 
 function shardFingerprintFile(projectRoot: string, shardId: string): string | null {
+  if (typeof shardId !== "string") return null;
   if (!SHARD_ID_PATTERN.test(shardId)) return null;
   return join(projectRoot, UA_DIR, "fingerprints", "shards", `${shardId}.json`);
 }

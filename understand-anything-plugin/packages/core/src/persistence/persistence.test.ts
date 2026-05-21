@@ -195,10 +195,22 @@ describe("persistence", () => {
       expect(loadShardFingerprints(tempDir, "../bad")).toBeNull();
     });
 
+    it("should return null for a non-string shard id even when null.json exists", () => {
+      saveShardFingerprints(tempDir, "null", sampleFingerprints);
+
+      expect(loadShardFingerprints(tempDir, null as any)).toBeNull();
+    });
+
     it("should throw when saving shard fingerprints with an invalid shard id", () => {
       expect(() => {
         saveShardFingerprints(tempDir, "../bad", sampleFingerprints);
       }).toThrow("Invalid shard id: ../bad");
+    });
+
+    it("should throw when saving shard fingerprints with a non-string shard id", () => {
+      expect(() => {
+        saveShardFingerprints(tempDir, null as any, sampleFingerprints);
+      }).toThrow("Invalid shard id");
     });
 
     it("should return null when shard fingerprint json is corrupted", () => {
