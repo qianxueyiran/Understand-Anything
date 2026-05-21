@@ -1,3 +1,5 @@
+import type { ManifestUpdateMetadata } from "./sharded-update.js";
+
 export const SHARD_ID_PATTERN = /^[A-Za-z0-9_-]+$/;
 
 export interface DomainShardedManifest {
@@ -12,6 +14,7 @@ export interface DomainShardedManifest {
     sourceCodeShard: string;
   }>;
   warnings: string[];
+  update?: ManifestUpdateMetadata;
 }
 
 export interface ProductShardedManifest {
@@ -29,12 +32,18 @@ export interface ProductShardedManifest {
     tracePath?: string;
   }>;
   warnings: string[];
+  update?: ManifestUpdateMetadata;
 }
 
 export interface ProductShardedManifestInput {
   productShardFiles: string[];
   domainShardFiles: string[];
   traceFiles: string[];
+  update?: ManifestUpdateMetadata;
+}
+
+export interface ShardedManifestBuildOptions {
+  update?: ManifestUpdateMetadata;
 }
 
 export function isValidShardId(shardId: string): boolean {
@@ -58,8 +67,11 @@ export function getTopLevelKind(value: unknown): string | undefined {
   return typeof kind === "string" && kind.length > 0 ? kind : undefined;
 }
 
-export function buildDomainShardedManifest(shardFiles: string[]): DomainShardedManifest {
-  return {
+export function buildDomainShardedManifest(
+  shardFiles: string[],
+  options: ShardedManifestBuildOptions = {},
+): DomainShardedManifest {
+  const manifest: DomainShardedManifest = {
     version: "1.0.0",
     kind: "domain-sharded",
     source: {
@@ -81,6 +93,10 @@ export function buildDomainShardedManifest(shardFiles: string[]): DomainShardedM
     }),
     warnings: [],
   };
+  if (options.update) {
+    manifest.update = options.update;
+  }
+  return manifest;
 }
 
 export function buildProductShardedManifest(
@@ -116,7 +132,7 @@ export function buildProductShardedManifest(
     return [shard];
   });
 
-  return {
+  const manifest: ProductShardedManifest = {
     version: "1.0.0",
     kind: "product-sharded",
     source: {
@@ -126,6 +142,10 @@ export function buildProductShardedManifest(
     shards,
     warnings,
   };
+  if (input.update) {
+    manifest.update = input.update;
+  }
+  return manifest;
 }
 
 function parseShardIdToArray(fileName: string): string[] {

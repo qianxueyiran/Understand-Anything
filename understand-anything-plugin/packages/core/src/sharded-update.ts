@@ -1,6 +1,8 @@
 import { createHash } from "node:crypto";
-import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { analyzeChanges, type FingerprintStore } from "./fingerprint.js";
+import type { PluginRegistry } from "./plugins/registry.js";
 import type { KnowledgeGraph } from "./types.js";
 
 const SHARD_ID_PATTERN = /^[A-Za-z0-9_-]+$/;
@@ -132,10 +134,17 @@ export interface AffectedCodeShard {
 }
 
 export interface ShardedUpdatePlan {
+  baseCommitHash?: string;
+  headCommitHash?: string;
   changedFiles: string[];
   affectedCodeShards: AffectedCodeShard[];
   unmappedChangedFiles: string[];
   warnings: string[];
+}
+
+export interface ShardedUpdatePlanInput extends AffectedShardPlanInput {
+  baseCommitHash: string;
+  headCommitHash: string;
 }
 
 export function buildAffectedShardPlan(input: AffectedShardPlanInput): ShardedUpdatePlan {
@@ -196,6 +205,58 @@ export function buildAffectedShardPlan(input: AffectedShardPlanInput): ShardedUp
     affectedCodeShards: [...affected.values()],
     unmappedChangedFiles,
     warnings,
+  };
+}
+
+export function buildShardedUpdatePlan(input: ShardedUpdatePlanInput): ShardedUpdatePlan {
+  const plan = buildAffectedShardPlan(input);
+  return {
+    ...plan,
+    baseCommitHash: input.baseCommitHash,
+    headCommitHash: input.headCommitHash,
+  };
+}
+
+export function saveShardedUpdatePlan(
+  projectRoot: string,
+  plan: ShardedUpdatePlan,
+): string {
+  const path = join(
+    projectRoot,
+    ".understand-anything",
+    "intermediate",
+    "sharded-update-plan.json",
+  );
+  mkdirSync(dirname(path), { recursive: true });
+  writeFileSync(path, JSON.stringify(plan, null, 2), "utf-8");
+  return path;
+}
+
+export interface ClassifyAffectedShardChangesInput {
+  projectRoot: string;
+  shard: AffectedCodeShard;
+  fingerprintStore: FingerprintStore;
+  registry: PluginRegistry;
+}
+
+export function classifyAffectedShardChanges(
+  input: ClassifyAffectedShardChangesInput,
+): AffectedCodeShard {
+  const analysis = analyzeChanges(
+    input.projectRoot,
+    input.shard.changedFiles,
+    input.fingerprintStore,
+    input.registry,
+  );
+
+  return {
+    ...input.shard,
+    structuralFiles: [
+      ...analysis.structurallyChangedFiles,
+      ...analysis.newFiles,
+    ],
+    cosmeticFiles: analysis.cosmeticOnlyFiles,
+    deletedFiles: analysis.deletedFiles,
   };
 }
 

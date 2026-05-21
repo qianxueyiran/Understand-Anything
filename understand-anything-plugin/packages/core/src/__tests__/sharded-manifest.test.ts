@@ -17,7 +17,17 @@ describe("sharded manifest helpers", () => {
   });
 
   it("builds a domain sharded manifest from shard file names", () => {
-    const manifest = buildDomainShardedManifest(["home.json", "player.json"]);
+    const update = {
+      updatedAt: "2026-05-21T00:00:00.000Z",
+      shards: {
+        home: {
+          artifactHash: "sha256:domain",
+          sourceCodeArtifactHash: "sha256:code",
+        },
+      },
+      warnings: ["kept"],
+    };
+    const manifest = buildDomainShardedManifest(["home.json", "player.json"], { update });
 
     expect(manifest).toEqual({
       version: "1.0.0",
@@ -34,17 +44,31 @@ describe("sharded manifest helpers", () => {
         },
       ],
       warnings: [],
+      update,
     });
-    expect(JSON.stringify(manifest)).not.toMatch(
+    expect(JSON.stringify(manifest.shards)).not.toMatch(
       /nodeCount|edgeCount|analyzedAt|gitCommitHash|updatedAt/
     );
   });
 
   it("builds a product sharded manifest from shard and trace file names", () => {
+    const update = {
+      updatedAt: "2026-05-21T00:00:00.000Z",
+      shards: {
+        home: {
+          artifactHash: "sha256:product",
+          traceArtifactHash: "sha256:trace",
+          sourceCodeArtifactHash: "sha256:code",
+          sourceDomainArtifactHash: "sha256:domain",
+        },
+      },
+      warnings: [],
+    };
     const manifest = buildProductShardedManifest({
       productShardFiles: ["home.json", "player.json"],
       domainShardFiles: ["home.json"],
       traceFiles: ["home.json"],
+      update,
     });
 
     expect(manifest).toEqual({
@@ -69,6 +93,7 @@ describe("sharded manifest helpers", () => {
         },
       ],
       warnings: ["product-shards/player.json has no matching product-traces/player.json"],
+      update,
     });
     expect(JSON.stringify(manifest)).not.toMatch(
       /topicCount|factCount|evidenceCount|signalsCount|contextPacksCount/

@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { describe, expect, it, afterEach, beforeEach } from "vitest";
@@ -6,10 +6,15 @@ import type { KnowledgeGraph } from "../types.js";
 import {
   buildAffectedShardPlan,
   buildCodeManifestUpdate,
+  buildShardedUpdatePlan,
+  classifyAffectedShardChanges,
   hashArtifactFile,
   pruneGraphForChangedFiles,
+  saveShardedUpdatePlan,
   type CodebaseShardedManifest,
 } from "../sharded-update.js";
+import type { FingerprintStore } from "../fingerprint.js";
+import type { PluginRegistry } from "../plugins/registry.js";
 
 let root: string;
 
@@ -286,6 +291,127 @@ describe("affected shard detection", () => {
       ["a_home/src/Home.kt"],
       ["a_home/src/Home.kt"],
     ]);
+  });
+
+  it("builds a complete sharded update plan with base and head commits", () => {
+    const plan = buildShardedUpdatePlan({
+      baseCommitHash: "base123",
+      headCommitHash: "head456",
+      manifest,
+      changedFiles: ["a_home/src/Home.kt"],
+      knownShardGraphs: {},
+      sourceFileExtensions: [".kt"],
+    });
+
+    expect(plan.baseCommitHash).toBe("base123");
+    expect(plan.headCommitHash).toBe("head456");
+    expect(plan.affectedCodeShards.map((shard) => shard.id)).toEqual(["home"]);
+  });
+
+  it("writes sharded update plans to the intermediate directory", () => {
+    const plan = buildShardedUpdatePlan({
+      baseCommitHash: "base123",
+      headCommitHash: "head456",
+      manifest,
+      changedFiles: ["a_home/src/Home.kt"],
+      knownShardGraphs: {},
+      sourceFileExtensions: [".kt"],
+    });
+
+    const path = saveShardedUpdatePlan(root, plan);
+
+    expect(path.endsWith(".understand-anything/intermediate/sharded-update-plan.json")).toBe(true);
+    expect(JSON.parse(readFileSync(path, "utf-8"))).toMatchObject({
+      baseCommitHash: "base123",
+      headCommitHash: "head456",
+      changedFiles: ["a_home/src/Home.kt"],
+    });
+  });
+});
+
+describe("shard change classification", () => {
+  const fakeRegistry = {
+    analyzeFile(filePath: string, content: string) {
+      if (filePath.endsWith(".txt")) return null;
+      const functions = Array.from(content.matchAll(/function\s+([A-Za-z0-9_]+)\s*\(([^)]*)\)/gu)).map(
+        (match) => ({
+          name: match[1],
+          params: match[2] ? match[2].split(",").map((item) => item.trim()).filter(Boolean) : [],
+          lineRange: [1, 1] as [number, number],
+        }),
+      );
+      return { functions, classes: [], imports: [], exports: [] };
+    },
+  } as unknown as PluginRegistry;
+
+  const fingerprintStore: FingerprintStore = {
+    version: "1.0.0",
+    gitCommitHash: "base123",
+    generatedAt: "2026-05-21T00:00:00.000Z",
+    files: {
+      "a_home/src/Home.kt": {
+        filePath: "a_home/src/Home.kt",
+        contentHash: "old",
+        functions: [{ name: "run", params: [], exported: false, lineCount: 1 }],
+        classes: [],
+        imports: [],
+        exports: [],
+        totalLines: 1,
+        hasStructuralAnalysis: true,
+      },
+      "a_home/src/Deleted.kt": {
+        filePath: "a_home/src/Deleted.kt",
+        contentHash: "old",
+        functions: [{ name: "deleted", params: [], exported: false, lineCount: 1 }],
+        classes: [],
+        imports: [],
+        exports: [],
+        totalLines: 1,
+        hasStructuralAnalysis: true,
+      },
+      "a_home/src/Cosmetic.kt": {
+        filePath: "a_home/src/Cosmetic.kt",
+        contentHash: "old",
+        functions: [{ name: "stable", params: [], exported: false, lineCount: 1 }],
+        classes: [],
+        imports: [],
+        exports: [],
+        totalLines: 1,
+        hasStructuralAnalysis: true,
+      },
+    },
+  };
+
+  it("classifies changed files for an affected shard using its fingerprint store", () => {
+    mkdirSync(join(root, "a_home", "src"), { recursive: true });
+    writeFileSync(join(root, "a_home", "src", "Home.kt"), "function run() {}\nfunction next() {}\n", "utf-8");
+    writeFileSync(join(root, "a_home", "src", "Cosmetic.kt"), "function stable() {}", "utf-8");
+    writeFileSync(join(root, "a_home", "src", "New.kt"), "function created() {}", "utf-8");
+
+    const shard = classifyAffectedShardChanges({
+      projectRoot: root,
+      shard: {
+        id: "home",
+        path: "shards/home.json",
+        scopes: ["a_home"],
+        changedFiles: [
+          "a_home/src/Home.kt",
+          "a_home/src/Cosmetic.kt",
+          "a_home/src/New.kt",
+          "a_home/src/Deleted.kt",
+        ],
+        structuralFiles: [],
+        cosmeticFiles: [],
+        deletedFiles: [],
+        reason: "changed file matched shard scope",
+      },
+      fingerprintStore,
+      registry: fakeRegistry,
+    });
+
+    expect(shard.structuralFiles).toEqual(["a_home/src/Home.kt", "a_home/src/New.kt"]);
+    expect(shard.cosmeticFiles).toEqual(["a_home/src/Cosmetic.kt"]);
+    expect(shard.deletedFiles).toEqual(["a_home/src/Deleted.kt"]);
   });
 });
 
