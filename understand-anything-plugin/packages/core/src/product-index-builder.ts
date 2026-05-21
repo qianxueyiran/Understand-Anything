@@ -57,7 +57,8 @@ export interface NormalizedProductTopic {
 export interface ProductContextAnchor {
   anchorId: string;
   nodeId: string;
-  type: "entry" | "behavior" | "rule" | "display" | "data" | "integration";
+  /** Evidence/signal role from code graph — not the same enum as ProductFact.type. */
+  signalType: "entry" | "behavior" | "rule" | "display" | "data" | "integration";
   text: string;
   symbol?: string;
   lineRange?: [number, number];
@@ -104,6 +105,7 @@ export interface FinalizeGroundedProductIndexInput {
   extractions: ProductTopicExtraction[];
   options: ProductProfileOptions;
   validationWarnings?: ProductCoverageWarning[];
+  warningsSink?: ProductCoverageWarning[];
 }
 
 export interface ProductBoundaryCandidateOptions {
@@ -478,9 +480,8 @@ export function finalizeGroundedProductIndex(input: FinalizeGroundedProductIndex
   const packByTopicId = new Map(contextPacks.map((pack) => [pack.topic.id, pack]));
   const extractionByTopicId = new Map(extractions.map((extraction) => [extraction.topicId, extraction]));
   const evidenceById = new Map<string, ProductEvidence>();
-  const facts: ProductFact[] = [];
   const outputTopics: ProductTopic[] = [];
-  const warnings: ProductIndex["coverage"]["warnings"] = [...(input.validationWarnings ?? [])];
+  const warnings: ProductCoverageWarning[] = [...(input.validationWarnings ?? [])];
 
   for (const topic of inputTopics) {
     const pack = packByTopicId.get(topic.id);
@@ -490,7 +491,7 @@ export function finalizeGroundedProductIndex(input: FinalizeGroundedProductIndex
     }
 
     const anchorById = indexAnchorsById(pack);
-    const factIds: string[] = [];
+    const topicFacts: ProductFact[] = [];
     const topicEvidenceIds: string[] = [];
     const entryEvidenceIds: string[] = [];
 
@@ -550,17 +551,16 @@ export function finalizeGroundedProductIndex(input: FinalizeGroundedProductIndex
         maturity: "summarized",
       };
 
-      facts.push(fact);
-      factIds.push(fact.id);
+      topicFacts.push(fact);
       topicEvidenceIds.push(...fact.evidenceIds);
       entryEvidenceIds.push(
         ...anchors
-          .filter((anchor) => anchor.type === "entry" || topic.rootNodeIds.includes(anchor.nodeId))
+          .filter((anchor) => anchor.signalType === "entry" || topic.rootNodeIds.includes(anchor.nodeId))
           .map((anchor) => evidenceIdForAnchor(anchor)),
       );
     });
 
-    if (factIds.length === 0) {
+    if (topicFacts.length === 0) {
       warnings.push({
         code: "topic-without-facts",
         severity: "warning",
@@ -578,22 +578,23 @@ export function finalizeGroundedProductIndex(input: FinalizeGroundedProductIndex
       aliases: [],
       summary: topic.summary,
       status: "summarized",
-      sourceCandidateIds: topic.sourceCandidateIds,
-      factIds: uniqueStrings(factIds),
+      facts: topicFacts,
       entryEvidenceIds: uniqueStrings(entryEvidenceIds).filter((evidenceId) => evidenceById.has(evidenceId)),
       evidenceIds: uniqueStrings(topicEvidenceIds),
       domainRefs: topic.domainRefs,
     });
   }
 
-  const outputFactIds = new Set(outputTopics.flatMap((topic) => topic.factIds));
-  const outputFacts = facts.filter((fact) => outputFactIds.has(fact.id));
   const outputEvidenceIds = new Set([
     ...outputTopics.flatMap((topic) => topic.entryEvidenceIds),
     ...outputTopics.flatMap((topic) => topic.evidenceIds),
-    ...outputFacts.flatMap((fact) => fact.evidenceIds),
+    ...outputTopics.flatMap((topic) => topic.facts.flatMap((fact) => fact.evidenceIds)),
   ]);
   const evidence = Array.from(evidenceById.values()).filter((item) => outputEvidenceIds.has(item.id));
+  const outputFacts = outputTopics.flatMap((topic) => topic.facts);
+  if (input.warningsSink) {
+    input.warningsSink.splice(0, input.warningsSink.length, ...warnings);
+  }
 
   return {
     version: "1.0.0",
@@ -614,7 +615,6 @@ export function finalizeGroundedProductIndex(input: FinalizeGroundedProductIndex
       },
     },
     topics: outputTopics,
-    facts: outputFacts,
     evidence,
     coverage: {
       platformProfiles: [options.platform],
@@ -622,7 +622,6 @@ export function finalizeGroundedProductIndex(input: FinalizeGroundedProductIndex
       indexedTopics: outputTopics.length,
       confirmedEvidence: evidence.filter((item) => item.confidence === "confirmed").length,
       generatedFacts: outputFacts.length,
-      warnings,
     },
     quality: {
       groundedFacts: outputFacts.length,
@@ -697,8 +696,7 @@ export function buildDeterministicProductIndex(
       aliases: seed.nameCandidates.slice(1, 6),
       summary: `${topicName} 相关产品入口，已索引 ${evidenceIds.length} 条代码证据。`,
       status: evidenceIds.length > 1 ? "indexed" : "seeded",
-      sourceCandidateIds: [],
-      factIds: [],
+      facts: [],
       entryEvidenceIds: uniqueStrings(entryEvidenceIds),
       evidenceIds: uniqueStrings(evidenceIds),
       domainRefs: collectDomainRefs(domainGraph, seed.nameCandidates),
@@ -739,7 +737,6 @@ export function buildDeterministicProductIndex(
       },
     },
     topics,
-    facts: [],
     evidence,
     coverage: {
       platformProfiles: [options.platform],
@@ -747,7 +744,6 @@ export function buildDeterministicProductIndex(
       indexedTopics: topics.length,
       confirmedEvidence: evidence.filter((item) => item.confidence === "confirmed").length,
       generatedFacts: 0,
-      warnings: [],
     },
   };
 }
@@ -948,7 +944,7 @@ function buildContextAnchors(node: GraphNode): ProductContextAnchor[] {
   return (node.businessSignals ?? []).map((signal, index) => ({
     anchorId: `anchor:${node.id}:${index}`,
     nodeId: node.id,
-    type: signal.type,
+    signalType: normalizeContextAnchorSignalType(signal.type),
     text: signal.text,
     symbol: node.name,
     ...(node.lineRange ? { lineRange: node.lineRange } : {}),
@@ -1311,7 +1307,7 @@ function buildEvidenceFromAnchor(
   node: GraphNode | undefined,
   confidence: ProductEvidence["confidence"],
 ): ProductEvidence {
-  const role = evidenceRoleFromAnchorType(anchor.type);
+  const role = evidenceRoleFromAnchorSignalType(anchor.signalType);
   const signalTypes: ProductSignalType[] = [role];
   const tokens = uniqueStrings([
     ...extractTokens(anchor.text),
@@ -1339,8 +1335,47 @@ function evidenceIdForAnchor(anchor: ProductContextAnchor): string {
   return anchor.anchorId.replace(/^anchor:/u, "evidence:");
 }
 
-function evidenceRoleFromAnchorType(anchorType: ProductContextAnchor["type"]): ProductEvidenceRole {
-  return anchorType;
+function normalizeContextAnchorSignalType(
+  rawType: string,
+): ProductContextAnchor["signalType"] {
+  const allowed: ProductContextAnchor["signalType"][] = [
+    "entry",
+    "behavior",
+    "rule",
+    "display",
+    "data",
+    "integration",
+  ];
+  return allowed.includes(rawType as ProductContextAnchor["signalType"])
+    ? (rawType as ProductContextAnchor["signalType"])
+    : "behavior";
+}
+
+export function normalizeLoadedContextPack(pack: TopicContextPack): TopicContextPack {
+  return {
+    ...pack,
+    candidateFiles: pack.candidateFiles.map((file) => ({
+      ...file,
+      anchors: file.anchors.map((anchor) => {
+        const legacyType = (anchor as ProductContextAnchor & { type?: string }).type;
+        const signalType =
+          anchor.signalType ??
+          (legacyType ? normalizeContextAnchorSignalType(legacyType) : "behavior");
+        const { type: _legacy, ...rest } = anchor as ProductContextAnchor & { type?: string };
+        return { ...rest, signalType };
+      }),
+    })),
+  };
+}
+
+export function normalizeLoadedContextPacks(packs: TopicContextPack[]): TopicContextPack[] {
+  return packs.map((pack) => normalizeLoadedContextPack(pack));
+}
+
+function evidenceRoleFromAnchorSignalType(
+  signalType: ProductContextAnchor["signalType"],
+): ProductEvidenceRole {
+  return signalType;
 }
 
 function highestEvidenceConfidence(

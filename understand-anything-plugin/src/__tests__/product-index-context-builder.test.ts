@@ -104,23 +104,21 @@ const productIndex: ProductIndex = {
       aliases: ["Cast"],
       summary: "视频投屏能力。",
       status: "summarized",
-      sourceCandidateIds: [],
-      factIds: ["fact:casting-entry"],
+      facts: [
+        {
+          id: "fact:casting-entry",
+          topicIds: ["topic:casting"],
+          type: "behavior",
+          text: "播放页提供投屏入口。",
+          conditions: ["仅在播放器页面展示"],
+          evidenceIds: ["ev:player-entry"],
+          confidence: "confirmed",
+          maturity: "summarized",
+        },
+      ],
       entryEvidenceIds: ["ev:player-entry"],
       evidenceIds: ["ev:player-entry"],
       domainRefs: [],
-    },
-  ],
-  facts: [
-    {
-      id: "fact:casting-entry",
-      topicIds: ["topic:casting"],
-      type: "behavior",
-      text: "播放页提供投屏入口。",
-      conditions: ["仅在播放器页面展示"],
-      evidenceIds: ["ev:player-entry"],
-      confidence: "confirmed",
-      maturity: "summarized",
     },
   ],
   evidence: [
@@ -144,7 +142,6 @@ const productIndex: ProductIndex = {
     indexedTopics: 1,
     confirmedEvidence: 1,
     generatedFacts: 1,
-    warnings: [],
   },
 };
 
@@ -170,14 +167,13 @@ describe("product index chat context", () => {
           ...productIndex.topics[0],
           aliases: [...productIndex.topics[0].aliases, "投屏入口在哪里"],
           entryEvidenceIds: [],
-          factIds: ["fact:casting-entry"],
           evidenceIds: [],
-        },
-      ],
-      facts: [
-        {
-          ...productIndex.facts[0],
-          evidenceIds: ["ev:player-entry"],
+          facts: [
+            {
+              ...productIndex.topics[0].facts[0],
+              evidenceIds: ["ev:player-entry"],
+            },
+          ],
         },
       ],
     };
@@ -202,12 +198,12 @@ describe("product index chat context", () => {
           ...productIndex.topics[0],
           entryEvidenceIds: [],
           evidenceIds: ["ev:cast-button"],
-        },
-      ],
-      facts: [
-        {
-          ...productIndex.facts[0],
-          evidenceIds: ["ev:player-entry"],
+          facts: [
+            {
+              ...productIndex.topics[0].facts[0],
+              evidenceIds: ["ev:player-entry"],
+            },
+          ],
         },
       ],
       evidence: [
@@ -330,12 +326,12 @@ describe("product index chat context", () => {
           ...productIndex.topics[0],
           evidenceIds: ["ev:cast-button"],
           entryEvidenceIds: ["ev:cast-button"],
-        },
-      ],
-      facts: [
-        {
-          ...productIndex.facts[0],
-          evidenceIds: ["ev:cast-button"],
+          facts: [
+            {
+              ...productIndex.topics[0].facts[0],
+              evidenceIds: ["ev:cast-button"],
+            },
+          ],
         },
       ],
       evidence: [
@@ -395,18 +391,18 @@ describe("product index prompt budget and fallback safety", () => {
           ...productIndex.topics[0],
           aliases: ["Cast One", "Cast Two", "Cast Three", "Cast Four", "Cast Five"],
           summary: `${longText}SUMMARY_TAIL_SHOULD_NOT_APPEAR`,
-        },
-      ],
-      facts: [
-        {
-          ...productIndex.facts[0],
-          text: `${longText}FACT_TAIL_SHOULD_NOT_APPEAR`,
-          conditions: [
-            "condition-1",
-            "condition-2",
-            "condition-3",
-            "condition-4",
-            "condition-5",
+          facts: [
+            {
+              ...productIndex.topics[0].facts[0],
+              text: `${longText}FACT_TAIL_SHOULD_NOT_APPEAR`,
+              conditions: [
+                "condition-1",
+                "condition-2",
+                "condition-3",
+                "condition-4",
+                "condition-5",
+              ],
+            },
           ],
         },
       ],
@@ -457,12 +453,12 @@ describe("product index prompt budget and fallback safety", () => {
           ...productIndex.topics[0],
           evidenceIds: ["ev:stale-symbol"],
           entryEvidenceIds: ["ev:stale-symbol"],
-        },
-      ],
-      facts: [
-        {
-          ...productIndex.facts[0],
-          evidenceIds: ["ev:stale-symbol"],
+          facts: [
+            {
+              ...productIndex.topics[0].facts[0],
+              evidenceIds: ["ev:stale-symbol"],
+            },
+          ],
         },
       ],
       evidence: [
@@ -494,12 +490,12 @@ describe("product index prompt budget and fallback safety", () => {
           ...productIndex.topics[0],
           evidenceIds: ["ev:stale-symbol"],
           entryEvidenceIds: ["ev:stale-symbol"],
-        },
-      ],
-      facts: [
-        {
-          ...productIndex.facts[0],
-          evidenceIds: ["ev:stale-symbol"],
+          facts: [
+            {
+              ...productIndex.topics[0].facts[0],
+              evidenceIds: ["ev:stale-symbol"],
+            },
+          ],
         },
       ],
       evidence: [

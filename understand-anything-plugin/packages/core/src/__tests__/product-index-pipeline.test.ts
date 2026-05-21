@@ -150,7 +150,7 @@ describe("product index strict pipeline", () => {
             {
               anchorId: "anchor:function:BootBroadcastReceiver.java:onReceive:0",
               nodeId: candidate.rootNodeId,
-              type: "behavior",
+              signalType: "entry",
               text: "接收开机广播并启动后续处理",
               snippetSummary: "开机广播处理",
             },
@@ -196,6 +196,65 @@ describe("product index strict pipeline", () => {
         "used-files-missing-evidence-file",
       ]),
     );
+  });
+
+  it("coerces signal-only fact types such as entry before schema validation", () => {
+    const pack: TopicContextPack = {
+      topic: {
+        id: "topic:boot-startup",
+        name: "开机启动处理",
+        summary: "系统开机广播触发应用初始化和首页数据准备。",
+        kind: "capability",
+        sourceCandidateIds: [candidate.id],
+        rootNodeIds: [candidate.rootNodeId],
+        domainRefs: [],
+      },
+      roots: [candidate.rootNodeId],
+      candidateFiles: [
+        {
+          fileId: "file:app/BootBroadcastReceiver.java",
+          filePath: "app/BootBroadcastReceiver.java",
+          nodeSummaries: [],
+          businessSignals: [],
+          structuralReasons: [],
+          anchors: [
+            {
+              anchorId: "anchor:function:BootBroadcastReceiver.java:onReceive:0",
+              nodeId: candidate.rootNodeId,
+              signalType: "entry",
+              text: "开机广播入口",
+              snippetSummary: "开机广播处理",
+            },
+          ],
+        },
+      ],
+      overflowFiles: [],
+    };
+
+    const result = validateProductExtractions(
+      [
+        {
+          topicId: "topic:boot-startup",
+          sourceReads: [],
+          usedFiles: [{ fileId: "file:app/BootBroadcastReceiver.java", reason: "入口证据" }],
+          ignoredFiles: [],
+          facts: [
+            {
+              type: "entry",
+              text: "系统开机广播会拉起应用启动处理。",
+              conditions: [],
+              evidenceRefs: ["anchor:function:BootBroadcastReceiver.java:onReceive:0"],
+              confidence: "confirmed",
+            },
+          ],
+          warnings: [],
+        },
+      ],
+      [pack],
+    );
+
+    expect(result.extractions[0]?.facts[0]?.type).toBe("behavior");
+    expect(result.warnings.map((warning) => warning.code)).toContain("fact-type-coerced-from-signal");
   });
 
   it("builds full strict trace", () => {

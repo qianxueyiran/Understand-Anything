@@ -18,6 +18,45 @@ export const ProductFactTypeSchema = z.enum([
   "mapping",
   "lifecycle",
 ]);
+
+type ProductFactTypeValue = z.infer<typeof ProductFactTypeSchema>;
+const PRODUCT_FACT_TYPES = new Set<ProductFactTypeValue>(ProductFactTypeSchema.options);
+
+/** Maps evidence/signal vocabulary (anchors, businessSignals) to product fact types. */
+export const PRODUCT_FACT_TYPE_FROM_SIGNAL: Readonly<Record<string, ProductFactTypeValue>> = {
+  entry: "behavior",
+  capability: "behavior",
+  surface: "display",
+  process: "lifecycle",
+  target: "behavior",
+  ui: "display",
+  copy: "display",
+  analytics: "integration",
+  network: "integration",
+  storage: "data",
+  lifecycle: "lifecycle",
+  behavior: "behavior",
+  rule: "rule",
+  display: "display",
+  data: "data",
+  integration: "integration",
+  mapping: "mapping",
+};
+
+export function normalizeProductFactType(rawType: unknown): ProductFactTypeValue {
+  if (typeof rawType !== "string" || rawType.trim().length === 0) {
+    return "behavior";
+  }
+  const normalized = rawType.trim().toLowerCase();
+  if (PRODUCT_FACT_TYPES.has(normalized as ProductFactTypeValue)) {
+    return normalized as ProductFactTypeValue;
+  }
+  return PRODUCT_FACT_TYPE_FROM_SIGNAL[normalized] ?? "behavior";
+}
+
+export function isAllowedProductFactType(rawType: unknown): rawType is ProductFactTypeValue {
+  return typeof rawType === "string" && PRODUCT_FACT_TYPES.has(rawType as ProductFactTypeValue);
+}
 export const ProductConfidenceSchema = z.enum(["confirmed", "inferred", "uncertain"]);
 export const ProductFactMaturitySchema = z.enum(["indexed", "summarized", "verified"]);
 export const ProductEvidenceRoleSchema = z.enum([
@@ -93,20 +132,6 @@ export const ProductEvidenceSchema = z
     }
   });
 
-export const ProductTopicSchema = z.object({
-  id: z.string().min(1),
-  kind: ProductTopicKindSchema,
-  name: z.string().min(1),
-  aliases: z.array(z.string().min(1)).default([]),
-  summary: z.string().min(1),
-  status: ProductTopicStatusSchema,
-  sourceCandidateIds: z.array(z.string().min(1)).default([]),
-  factIds: z.array(z.string().min(1)).default([]),
-  entryEvidenceIds: z.array(z.string().min(1)).default([]),
-  evidenceIds: z.array(z.string().min(1)).default([]),
-  domainRefs: z.array(z.string().min(1)).default([]),
-});
-
 export const ProductFactSchema = z
   .object({
     id: z.string().min(1),
@@ -128,6 +153,19 @@ export const ProductFactSchema = z
     }
   });
 
+export const ProductTopicSchema = z.object({
+  id: z.string().min(1),
+  kind: ProductTopicKindSchema,
+  name: z.string().min(1),
+  aliases: z.array(z.string().min(1)).default([]),
+  summary: z.string().min(1),
+  status: ProductTopicStatusSchema,
+  facts: z.array(ProductFactSchema).default([]),
+  entryEvidenceIds: z.array(z.string().min(1)).default([]),
+  evidenceIds: z.array(z.string().min(1)).default([]),
+  domainRefs: z.array(z.string().min(1)).default([]),
+});
+
 export const ProductCoverageWarningSchema = z.object({
   code: z.string().min(1),
   severity: z.enum(["info", "warning", "error"]).optional(),
@@ -145,7 +183,6 @@ export const ProductCoverageSchema = z.object({
   indexedTopics: z.number().int().nonnegative(),
   confirmedEvidence: z.number().int().nonnegative(),
   generatedFacts: z.number().int().nonnegative(),
-  warnings: z.array(ProductCoverageWarningSchema).default([]),
 });
 
 export const ProductQualitySchema = z
@@ -183,7 +220,6 @@ export const ProductIndexSchema = z
     project: ProductProjectSchema,
     sources: ProductSourcesSchema,
     topics: z.array(ProductTopicSchema).default([]),
-    facts: z.array(ProductFactSchema).default([]),
     evidence: z.array(ProductEvidenceSchema).default([]),
     coverage: ProductCoverageSchema,
     quality: ProductQualitySchema.optional(),
@@ -192,6 +228,7 @@ export const ProductIndexSchema = z
     const seenTopicIds = new Set<string>();
     const seenFactIds = new Set<string>();
     const seenEvidenceIds = new Set<string>();
+    const factsByTopic = new Map<string, ProductFact[]>();
 
     for (const topic of index.topics) {
       if (seenTopicIds.has(topic.id)) {
@@ -202,17 +239,25 @@ export const ProductIndexSchema = z
         });
       }
       seenTopicIds.add(topic.id);
-    }
 
-    for (const fact of index.facts) {
-      if (seenFactIds.has(fact.id)) {
-        ctx.addIssue({
-          code: "custom",
-          message: `duplicate fact id ${fact.id}`,
-          path: ["facts"],
-        });
+      factsByTopic.set(topic.id, topic.facts);
+      for (const fact of topic.facts) {
+        if (seenFactIds.has(fact.id)) {
+          ctx.addIssue({
+            code: "custom",
+            message: `duplicate fact id ${fact.id}`,
+            path: ["topics"],
+          });
+        }
+        seenFactIds.add(fact.id);
+        if (!fact.topicIds.includes(topic.id)) {
+          ctx.addIssue({
+            code: "custom",
+            message: `fact ${fact.id} must include parent topic id ${topic.id}`,
+            path: ["topics"],
+          });
+        }
       }
-      seenFactIds.add(fact.id);
     }
 
     for (const evidence of index.evidence) {
@@ -240,35 +285,25 @@ export const ProductIndexSchema = z
         }
       }
 
-      for (const factId of topic.factIds) {
-        if (!seenFactIds.has(factId)) {
-          ctx.addIssue({
-            code: "custom",
-            message: `topic ${topic.id} references unknown fact id ${factId}`,
-            path: ["topics"],
-          });
+      for (const fact of factsByTopic.get(topic.id) ?? []) {
+        for (const topicId of fact.topicIds) {
+          if (!topicIds.has(topicId)) {
+            ctx.addIssue({
+              code: "custom",
+              message: `fact ${fact.id} references unknown topic id ${topicId}`,
+              path: ["topics"],
+            });
+          }
         }
-      }
-    }
 
-    for (const fact of index.facts) {
-      for (const topicId of fact.topicIds) {
-        if (!topicIds.has(topicId)) {
-          ctx.addIssue({
-            code: "custom",
-            message: `fact ${fact.id} references unknown topic id ${topicId}`,
-            path: ["facts"],
-          });
-        }
-      }
-
-      for (const evidenceId of fact.evidenceIds) {
-        if (!evidenceIds.has(evidenceId)) {
-          ctx.addIssue({
-            code: "custom",
-            message: `fact ${fact.id} references unknown evidence id ${evidenceId}`,
-            path: ["facts"],
-          });
+        for (const evidenceId of fact.evidenceIds) {
+          if (!evidenceIds.has(evidenceId)) {
+            ctx.addIssue({
+              code: "custom",
+              message: `fact ${fact.id} references unknown evidence id ${evidenceId}`,
+              path: ["topics"],
+            });
+          }
         }
       }
     }
@@ -376,19 +411,10 @@ export function searchProductIndex(
 }
 
 function buildSearchDocuments(index: ProductIndex): ProductIndexSearchDocument[] {
-  const factsByTopic = new Map<string, ProductFact[]>();
-  for (const fact of index.facts) {
-    for (const topicId of fact.topicIds) {
-      const facts = factsByTopic.get(topicId) ?? [];
-      facts.push(fact);
-      factsByTopic.set(topicId, facts);
-    }
-  }
-
   const evidenceById = new Map(index.evidence.map((evidence) => [evidence.id, evidence]));
 
   return index.topics.map((topic) => {
-    const facts = factsByTopic.get(topic.id) ?? [];
+    const facts = topic.facts;
     const evidenceIds = new Set([
       ...topic.entryEvidenceIds,
       ...topic.evidenceIds,

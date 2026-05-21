@@ -6,7 +6,13 @@ import {
   type ProductTopicExtraction,
   type TopicContextPack,
 } from "./product-index-builder.js";
-import { ProductConfidenceSchema, ProductFactTypeSchema, ProductTopicKindSchema } from "./product-index.js";
+import {
+  isAllowedProductFactType,
+  normalizeProductFactType,
+  ProductConfidenceSchema,
+  ProductFactTypeSchema,
+  ProductTopicKindSchema,
+} from "./product-index.js";
 
 export const PipelineWarningSeveritySchema = z.enum(["info", "warning", "error"]);
 export type PipelineWarningSeverity = z.infer<typeof PipelineWarningSeveritySchema>;
@@ -223,6 +229,42 @@ export function applyTopicNormalization(
   });
 }
 
+export function normalizeProductExtractionsPayload(data: unknown): {
+  data: unknown;
+  coercions: Array<{ topicId: string; from: string; to: string }>;
+} {
+  if (!Array.isArray(data)) {
+    return { data, coercions: [] };
+  }
+
+  const coercions: Array<{ topicId: string; from: string; to: string }> = [];
+  const normalized = data.map((item) => {
+    if (!item || typeof item !== "object" || !("facts" in item)) {
+      return item;
+    }
+    const extraction = item as {
+      topicId?: string;
+      facts?: Array<{ type?: unknown } & Record<string, unknown>>;
+    };
+    const topicId = typeof extraction.topicId === "string" ? extraction.topicId : "unknown-topic";
+    const facts = Array.isArray(extraction.facts)
+      ? extraction.facts.map((fact) => {
+          const rawType = fact.type;
+          if (isAllowedProductFactType(rawType)) {
+            return fact;
+          }
+          const from = typeof rawType === "string" ? rawType : String(rawType ?? "");
+          const to = normalizeProductFactType(rawType);
+          coercions.push({ topicId, from, to });
+          return { ...fact, type: to };
+        })
+      : extraction.facts;
+    return { ...extraction, facts };
+  });
+
+  return { data: normalized, coercions };
+}
+
 export function validateProductExtractions(
   data: unknown,
   contextPacks: TopicContextPack[],
@@ -231,13 +273,21 @@ export function validateProductExtractions(
     throw new Error("product-index-extractions.json must be a JSON array.");
   }
 
-  const parsed = z.array(ProductTopicExtractionSchema).safeParse(data);
+  const { data: normalizedData, coercions } = normalizeProductExtractionsPayload(data);
+  const parsed = z.array(ProductTopicExtractionSchema).safeParse(normalizedData);
   if (!parsed.success) {
     throw new Error(`Invalid product-index-extractions.json: ${formatZodError(parsed.error)}`);
   }
 
   const extractions = parsed.data;
-  const warnings: ProductPipelineWarning[] = [];
+  const warnings: ProductPipelineWarning[] = coercions.map((coercion) =>
+    warning(
+      "fact-type-coerced-from-signal",
+      "fact-extraction",
+      `Fact type "${coercion.from}" is an evidence signal label, not a product fact type; coerced to "${coercion.to}".`,
+      { topicId: coercion.topicId },
+    ),
+  );
   const packByTopicId = new Map(contextPacks.map((pack) => [pack.topic.id, pack]));
   const extractionCounts = new Map<string, number>();
 

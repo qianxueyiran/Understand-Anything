@@ -39,8 +39,8 @@ describe("understand-product strict docs", () => {
     expect(skill).toContain("intermediate/product-shards/<id>");
     expect(skill).toContain("product-traces/<id>.json");
     expect(skill).toContain("--finalize --shard <id>");
-    expect(skill).toContain("完成 `--finalize --shard <id>` 后");
-    expect(skill).toContain("--refresh-shards` 刷新");
+    expect(skill).toContain("CLI 会自动刷新");
+    expect(skill).toContain("--refresh-shards` 仍可用于重新扫描");
   });
 
   it("documents shard-specific paths in each product phase", () => {
@@ -70,6 +70,7 @@ describe("understand-product strict docs", () => {
     expect(phase5).toContain("intermediate/product-shards/<id>/product-index-extractions-by-topic/*.json");
     expect(phase5).toContain("product-shards/<id>.json");
     expect(phase5).toContain("product-traces/<id>.json");
+    expect(phase5).toContain("CLI 会自动刷新");
     expect(phase5).toContain("--refresh-shards");
   });
 
@@ -95,6 +96,8 @@ describe("understand-product strict docs", () => {
     expect(analyzer).toContain("必须读取你认为与当前 topic 相关的 `candidateFiles[].filePath` 源码");
     expect(analyzer).toContain("不能读取 `overflowFiles`");
     expect(analyzer).toContain("`behavior`、`rule`、`display`、`data`、`integration`、`mapping`、`lifecycle`");
+    expect(analyzer).toContain("anchors[].signalType");
+    expect(analyzer).toContain("禁止");
     expect(analyzer).not.toContain("`target`、`entry`");
   });
 });

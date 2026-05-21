@@ -103,6 +103,42 @@ export function buildExplainContext(
 }
 
 /**
+ * Build explain context from one or more already-selected graph shards.
+ *
+ * Consumers should locate candidate shard files first (for example with rg
+ * against `.understand-anything/shards/`) and pass only the relevant shards.
+ */
+export function buildExplainContextFromGraphs(
+  graphs: KnowledgeGraph[],
+  path: string,
+): ExplainContext {
+  const graphWithTarget = graphs.find((graph) => graphContainsTarget(graph, path));
+  const baseGraph = graphWithTarget ?? graphs[0];
+
+  if (!baseGraph) {
+    return {
+      projectName: "sharded graph",
+      path,
+      targetNode: null,
+      childNodes: [],
+      connectedNodes: [],
+      relevantEdges: [],
+      layer: null,
+    };
+  }
+
+  const mergedGraph: KnowledgeGraph = {
+    ...baseGraph,
+    nodes: dedupeById(graphs.flatMap((graph) => graph.nodes)),
+    edges: dedupeEdges(graphs.flatMap((graph) => graph.edges)),
+    layers: dedupeById(graphs.flatMap((graph) => graph.layers)),
+    tour: graphs.flatMap((graph) => graph.tour),
+  };
+
+  return buildExplainContext(mergedGraph, path);
+}
+
+/**
  * Format the explain context as a structured prompt for LLM consumption.
  */
 export function formatExplainPrompt(ctx: ExplainContext): string {
@@ -193,4 +229,32 @@ export function formatExplainPrompt(ctx: ExplainContext): string {
   lines.push("");
 
   return lines.join("\n");
+}
+
+function graphContainsTarget(graph: KnowledgeGraph, path: string): boolean {
+  const colonIdx = path.lastIndexOf(":");
+  if (colonIdx > 0 && !path.includes("://")) {
+    const filePath = path.slice(0, colonIdx);
+    const funcName = path.slice(colonIdx + 1);
+    if (graph.nodes.some((node) => node.filePath === filePath && node.name === funcName)) {
+      return true;
+    }
+  }
+
+  return graph.nodes.some((node) => node.filePath === path);
+}
+
+function dedupeById<T extends { id: string }>(items: T[]): T[] {
+  return [...new Map(items.map((item) => [item.id, item])).values()];
+}
+
+function dedupeEdges(edges: GraphEdge[]): GraphEdge[] {
+  return [
+    ...new Map(
+      edges.map((edge) => [
+        `${edge.source}\u0000${edge.target}\u0000${edge.type}`,
+        edge,
+      ]),
+    ).values(),
+  ];
 }

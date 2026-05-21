@@ -22,6 +22,7 @@ export {
 } from "./diff-analyzer.js";
 export {
   buildExplainContext,
+  buildExplainContextFromGraphs,
   formatExplainPrompt,
   type ExplainContext,
 } from "./explain-builder.js";

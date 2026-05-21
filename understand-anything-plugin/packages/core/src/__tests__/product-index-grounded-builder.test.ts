@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { GraphEdge, GraphNode, KnowledgeGraph } from "../types.js";
-import { validateProductIndex } from "../product-index.js";
+import { validateProductIndex, type ProductCoverageWarning } from "../product-index.js";
 import {
   buildProductBoundaryCandidates,
   buildTopicContextPacks,
@@ -212,10 +212,9 @@ describe("grounded product index builder", () => {
     });
 
     expect(index.topics).toHaveLength(1);
-    expect(index.facts).toHaveLength(1);
+    expect(index.topics[0].facts).toHaveLength(1);
     expect(index.evidence).toHaveLength(1);
-    expect(index.topics[0].factIds).toEqual([index.facts[0].id]);
-    expect(index.facts[0].evidenceIds).toEqual([index.evidence[0].id]);
+    expect(index.topics[0].facts[0].evidenceIds).toEqual([index.evidence[0].id]);
     expect(index.evidence[0].lineRange).toEqual([18, 21]);
     expect(validateProductIndex(index).success).toBe(true);
   });
@@ -232,6 +231,7 @@ describe("grounded product index builder", () => {
       domainRefs: [],
     };
 
+    const warnings: ProductCoverageWarning[] = [];
     const index = finalizeGroundedProductIndex({
       graph: kg,
       topics: [topic],
@@ -253,12 +253,12 @@ describe("grounded product index builder", () => {
         },
       ],
       options: { platform: "android", analyzedAt: "2026-05-19T00:00:00.000Z" },
+      warningsSink: warnings,
     });
 
     expect(index.topics).toHaveLength(0);
-    expect(index.facts).toHaveLength(0);
     expect(index.evidence).toHaveLength(0);
-    expect(index.coverage.warnings.some((warning) => warning.code === "fact-without-evidence")).toBe(true);
+    expect(warnings.some((warning) => warning.code === "fact-without-evidence")).toBe(true);
   });
 
   it("merges repeated evidence confidence using the highest confidence independent of fact order", () => {
@@ -320,7 +320,7 @@ describe("grounded product index builder", () => {
     const confirmedFirstIndex = finalize([confirmedFact, inferredFact]);
 
     for (const index of [inferredFirstIndex, confirmedFirstIndex]) {
-      expect(index.facts).toHaveLength(2);
+      expect(index.topics[0].facts).toHaveLength(2);
       expect(index.evidence).toHaveLength(1);
       expect(index.evidence[0].confidence).toBe("confirmed");
       expect(index.coverage.confirmedEvidence).toBe(1);

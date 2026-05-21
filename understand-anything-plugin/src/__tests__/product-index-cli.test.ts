@@ -280,7 +280,7 @@ describe("product-index CLI", () => {
     );
   });
 
-  it("finalizes a product shard without writing root product outputs", async () => {
+  it("finalizes a product shard and refreshes the root product manifest", async () => {
     writeShardedRoot();
     writeCodeShard("home", {
       ...graph,
@@ -393,9 +393,18 @@ describe("product-index CLI", () => {
     expect(
       existsSync(join(testRoot, ".understand-anything", "product-traces", "home.json")),
     ).toBe(true);
-    expect(
-      existsSync(join(testRoot, ".understand-anything", "product-index.json")),
-    ).toBe(false);
+    const productManifest = JSON.parse(
+      readFileSync(join(testRoot, ".understand-anything", "product-index.json"), "utf-8"),
+    ) as { kind: string; shards: Array<{ id: string; path: string; tracePath?: string }> };
+    expect(productManifest.kind).toBe("product-sharded");
+    expect(productManifest.shards).toEqual([
+      {
+        id: "home",
+        path: "product-shards/home.json",
+        sourceCodeShard: "shards/home.json",
+        tracePath: "product-traces/home.json",
+      },
+    ]);
     expect(
       existsSync(join(testRoot, ".understand-anything", "product-index-trace.json")),
     ).toBe(false);

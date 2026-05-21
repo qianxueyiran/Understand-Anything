@@ -265,7 +265,7 @@ Rules:
 - Each function/method node may have at most 1 signal.
 - Each class node may have at most 3 signals.
 - Each file node may have at most 8 signals.
-- `text` must be product phrase, not code explanation. **Focused on ”WHO DO WHAT“, not "HOW"**
+- `text`: 必须是**产品语言表达的业务表现，不允许出现代码，不允许出现技术描述**. **Focused on ”WHO DO WHAT“, not "HOW"**
 - Do not emit signals for ViewBinding initialization, inheritance, dependency injection, logging, generic utilities, observer registration, or base framework boilerplate.
 
 Examples:

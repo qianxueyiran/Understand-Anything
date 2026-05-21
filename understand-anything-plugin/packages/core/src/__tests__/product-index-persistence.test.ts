@@ -32,23 +32,21 @@ const sampleIndex: ProductIndex = {
       aliases: ["Cast"],
       summary: "Send playback to a casting device.",
       status: "indexed",
-      sourceCandidateIds: [],
-      factIds: [],
+      facts: [
+        {
+          id: "fact:casting-entry",
+          topicIds: ["topic:casting"],
+          type: "behavior",
+          text: "The casting entry opens device selection.",
+          conditions: [],
+          evidenceIds: ["ev:cast-button"],
+          confidence: "confirmed",
+          maturity: "indexed",
+        },
+      ],
       entryEvidenceIds: ["ev:cast-button"],
       evidenceIds: ["ev:cast-button"],
       domainRefs: [],
-    },
-  ],
-  facts: [
-    {
-      id: "fact:casting-entry",
-      topicIds: ["topic:casting"],
-      type: "behavior",
-      text: "The casting entry opens device selection.",
-      conditions: [],
-      evidenceIds: ["ev:cast-button"],
-      confidence: "confirmed",
-      maturity: "indexed",
     },
   ],
   evidence: [
@@ -72,7 +70,6 @@ const sampleIndex: ProductIndex = {
     indexedTopics: 1,
     confirmedEvidence: 1,
     generatedFacts: 1,
-    warnings: [],
   },
 };
 
@@ -110,7 +107,12 @@ describe("product index persistence", () => {
 
   it("validates before saving", () => {
     const invalid = cloneIndex({
-      facts: [{ ...sampleIndex.facts[0], evidenceIds: [] }],
+      topics: [
+        {
+          ...sampleIndex.topics[0],
+          facts: [{ ...sampleIndex.topics[0].facts[0], evidenceIds: [] }],
+        },
+      ],
     });
 
     expect(() => saveProductIndex(testRoot, invalid)).toThrow(

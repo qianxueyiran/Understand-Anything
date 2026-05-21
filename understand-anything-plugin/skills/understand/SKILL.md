@@ -8,6 +8,13 @@ argument-hint: ["[path] [--full|--auto-update|--no-auto-update|--review|--langua
 
 Analyze the current codebase and produce a `knowledge-graph.json` file in `.understand-anything/`. This file powers the interactive dashboard for exploring the project's architecture.
 
+## Mandatory Execution Contract
+
+- Treat this skill as a strict workflow contract: run the required phase subagents (`project-scanner`, `file-analyzer`, `assemble-reviewer`, `architecture-analyzer`, `tour-builder`, and `graph-reviewer` when requested).
+- Do not replace required subagents with ad hoc scripts, heuristics, or manual JSON assembly. Use scripts only where this skill explicitly names them as phase-internal tools.
+- If a required phase fails after the documented retry, stop and report the failure; continue with a reduced workflow only after explicit user approval.
+- Before Phase 1, honor `.understandignore` confirmation; before finishing, report which subagents actually ran and the validation result.
+
 ## Options
 
 - `$ARGUMENTS` may contain:

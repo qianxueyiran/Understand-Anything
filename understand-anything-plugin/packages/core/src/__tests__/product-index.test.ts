@@ -44,23 +44,21 @@ const sampleIndex: ProductIndex = {
       aliases: ["Cast", "DLNA"],
       summary: "把当前视频推送到可投屏设备播放。",
       status: "summarized",
-      sourceCandidateIds: [],
-      factIds: [],
+      facts: [
+        {
+          id: "fact:casting-disabled-by-cast-allowed",
+          topicIds: ["topic:casting"],
+          type: "rule",
+          text: "当 castAllowed 为 false 时，投屏入口会被禁用或隐藏。",
+          conditions: ["castAllowed=false"],
+          evidenceIds: ["ev:cast-allowed-field"],
+          confidence: "confirmed",
+          maturity: "summarized",
+        },
+      ],
       entryEvidenceIds: ["ev:cast-button"],
       evidenceIds: ["ev:cast-button", "ev:cast-allowed-field"],
       domainRefs: ["domain:playback"],
-    },
-  ],
-  facts: [
-    {
-      id: "fact:casting-disabled-by-cast-allowed",
-      topicIds: ["topic:casting"],
-      type: "rule",
-      text: "当 castAllowed 为 false 时，投屏入口会被禁用或隐藏。",
-      conditions: ["castAllowed=false"],
-      evidenceIds: ["ev:cast-allowed-field"],
-      confidence: "confirmed",
-      maturity: "summarized",
     },
   ],
   evidence: [
@@ -97,7 +95,6 @@ const sampleIndex: ProductIndex = {
     indexedTopics: 1,
     confirmedEvidence: 2,
     generatedFacts: 1,
-    warnings: [],
   },
 };
 
@@ -149,23 +146,21 @@ describe("ProductIndex schema", () => {
           aliases: [],
           summary: "开机广播触发首页初始化相关业务。",
           status: "indexed",
-          sourceCandidateIds: ["candidate:BootBroadcastReceiver"],
-          factIds: ["fact:boot-receiver-entry"],
+          facts: [
+            {
+              id: "fact:boot-receiver-entry",
+              topicIds: ["topic:boot-receiver"],
+              type: "behavior",
+              text: "应用接收开机广播后会启动后续首页初始化处理。",
+              conditions: ["系统发出开机广播"],
+              evidenceIds: ["evidence:BootBroadcastReceiver.onReceive"],
+              confidence: "confirmed",
+              maturity: "indexed",
+            },
+          ],
           entryEvidenceIds: ["evidence:BootBroadcastReceiver.onReceive"],
           evidenceIds: ["evidence:BootBroadcastReceiver.onReceive"],
           domainRefs: [],
-        },
-      ],
-      facts: [
-        {
-          id: "fact:boot-receiver-entry",
-          topicIds: ["topic:boot-receiver"],
-          type: "behavior",
-          text: "应用接收开机广播后会启动后续首页初始化处理。",
-          conditions: ["系统发出开机广播"],
-          evidenceIds: ["evidence:BootBroadcastReceiver.onReceive"],
-          confidence: "confirmed",
-          maturity: "indexed",
         },
       ],
       evidence: [
@@ -190,7 +185,6 @@ describe("ProductIndex schema", () => {
         indexedTopics: 1,
         confirmedEvidence: 1,
         generatedFacts: 1,
-        warnings: [],
       },
       quality: {
         groundedFacts: 1,
@@ -208,8 +202,7 @@ describe("ProductIndex schema", () => {
       topics: [
         {
           ...sampleIndex.topics[0],
-          sourceCandidateIds: undefined,
-          factIds: undefined,
+          facts: undefined,
         },
       ],
       evidence: [
@@ -221,15 +214,19 @@ describe("ProductIndex schema", () => {
     });
 
     expect(result.success).toBe(true);
-    expect(result.data?.topics[0].sourceCandidateIds).toEqual([]);
-    expect(result.data?.topics[0].factIds).toEqual([]);
+    expect(result.data?.topics[0].facts).toEqual([]);
     expect(result.data?.evidence[0].nodeIds).toEqual([]);
   });
 
   it("rejects confirmed fact without evidence ids", () => {
     const invalid: ProductIndex = {
       ...sampleIndex,
-      facts: [{ ...sampleIndex.facts[0], evidenceIds: [] }],
+      topics: [
+        {
+          ...sampleIndex.topics[0],
+          facts: [{ ...sampleIndex.topics[0].facts[0], evidenceIds: [] }],
+        },
+      ],
     };
     const result = validateProductIndex(invalid);
     expect(result.success).toBe(false);
@@ -259,7 +256,15 @@ describe("ProductIndex schema", () => {
   it("rejects duplicate fact ids", () => {
     const invalid: ProductIndex = {
       ...sampleIndex,
-      facts: [...sampleIndex.facts, { ...sampleIndex.facts[0], text: "重复事实。" }],
+      topics: [
+        {
+          ...sampleIndex.topics[0],
+          facts: [
+            ...sampleIndex.topics[0].facts,
+            { ...sampleIndex.topics[0].facts[0], text: "重复事实。" },
+          ],
+        },
+      ],
     };
     const result = validateProductIndex(invalid);
     expect(result.success).toBe(false);
@@ -322,12 +327,12 @@ describe("searchProductIndex", () => {
         {
           ...sampleIndex.topics[0],
           evidenceIds: ["ev:cast-button"],
-        },
-      ],
-      facts: [
-        {
-          ...sampleIndex.facts[0],
-          evidenceIds: ["ev:server-experiment"],
+          facts: [
+            {
+              ...sampleIndex.topics[0].facts[0],
+              evidenceIds: ["ev:server-experiment"],
+            },
+          ],
         },
       ],
       evidence: [

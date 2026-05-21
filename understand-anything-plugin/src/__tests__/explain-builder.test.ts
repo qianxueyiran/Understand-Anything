@@ -1,5 +1,9 @@
 import { describe, it, expect } from "vitest";
-import { buildExplainContext, formatExplainPrompt } from "../explain-builder.js";
+import {
+  buildExplainContext,
+  buildExplainContextFromGraphs,
+  formatExplainPrompt,
+} from "../explain-builder.js";
 import type { KnowledgeGraph } from "@understand-anything/core";
 
 const sampleGraph: KnowledgeGraph = {
@@ -61,6 +65,38 @@ describe("explain-builder", () => {
     it("finds function nodes by partial path match", () => {
       const ctx = buildExplainContext(sampleGraph, "src/auth.ts:login");
       expect(ctx.targetNode?.name).toBe("login");
+    });
+
+    it("builds context from sharded graphs without requiring a complete root graph", () => {
+      const homeShard: KnowledgeGraph = {
+        ...sampleGraph,
+        project: { ...sampleGraph.project, name: "home-shard" },
+        nodes: [
+          sampleGraph.nodes[0],
+          sampleGraph.nodes[1],
+        ],
+        edges: [
+          { source: "file:src/auth.ts", target: "function:src/auth.ts:login", type: "contains", direction: "forward", weight: 1.0 },
+          { source: "function:src/auth.ts:login", target: "file:src/db.ts", type: "reads_from", direction: "forward", weight: 0.8 },
+        ],
+        layers: [
+          { id: "layer:auth", name: "Auth Layer", description: "Authentication", nodeIds: ["file:src/auth.ts"] },
+        ],
+      };
+      const dbShard: KnowledgeGraph = {
+        ...sampleGraph,
+        project: { ...sampleGraph.project, name: "db-shard" },
+        nodes: [sampleGraph.nodes[3]],
+        edges: [],
+        layers: [],
+      };
+
+      const ctx = buildExplainContextFromGraphs([homeShard, dbShard], "src/auth.ts");
+
+      expect(ctx.projectName).toBe("home-shard");
+      expect(ctx.targetNode?.id).toBe("file:src/auth.ts");
+      expect(ctx.connectedNodes.map((node) => node.id)).toContain("file:src/db.ts");
+      expect(ctx.layer?.name).toBe("Auth Layer");
     });
   });
 

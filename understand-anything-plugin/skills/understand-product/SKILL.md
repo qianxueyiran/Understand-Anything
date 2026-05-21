@@ -265,13 +265,9 @@ $PROJECT_ROOT/.understand-anything/product-traces/<id>.json
 
 非 shard 模式的 `product-index-trace.json` 和 shard 模式的 `product-traces/<id>.json` 都必须保留 boundary candidates、topic normalization、context packs、extractions、discarded candidates、ignored files、overflow files 和 warnings。
 
-完成 `--finalize --shard <id>` 后，必须运行：
+完成 `--finalize --shard <id>` 后，CLI 会自动刷新 `.understand-anything/product-index.json` manifest，使新生成的 product shard 和 trace 被索引。
 
-```bash
-node "$PLUGIN_ROOT/dist/product-index-cli.js" "$PROJECT_ROOT" --refresh-shards
-```
-
-用 `--refresh-shards` 刷新 `.understand-anything/product-index.json` manifest，使新生成的 `$PROJECT_ROOT/.understand-anything/product-shards/<id>.json` 被索引。
+无需额外手动运行刷新命令；`--refresh-shards` 仍可用于重新扫描 `product-shards/`、`product-traces/` 和 `domain-shards/` 文件名，修复或重建 `.understand-anything/product-index.json` manifest。
 
 ## 完成输出
 

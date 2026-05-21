@@ -1,7 +1,6 @@
 import { useMemo, useState } from "react";
 import type {
   ProductEvidence,
-  ProductFact,
   ProductTopic,
 } from "@understand-anything/core/product-index";
 import type { KnowledgeGraph } from "@understand-anything/core/types";
@@ -23,6 +22,7 @@ function collectTopicText(topic: ProductTopic): string {
       topic.summary,
       ...topic.aliases,
       ...topic.domainRefs,
+      ...topic.facts.flatMap((fact) => [fact.text, ...fact.conditions]),
     ].join(" "),
   );
 }
@@ -80,10 +80,6 @@ export default function ProductIndexPanel() {
     () => new Map((productIndex?.evidence ?? []).map((evidence) => [evidence.id, evidence])),
     [productIndex],
   );
-  const factsById = useMemo(
-    () => new Map((productIndex?.facts ?? []).map((fact) => [fact.id, fact])),
-    [productIndex],
-  );
 
   const topics = useMemo(() => {
     if (!productIndex) return [];
@@ -123,9 +119,7 @@ export default function ProductIndexPanel() {
       ) : (
         <div className="space-y-2.5">
           {topics.map((topic) => {
-            const facts = (topic.factIds ?? [])
-              .map((id) => factsById.get(id))
-              .filter((fact): fact is ProductFact => Boolean(fact));
+            const facts = topic.facts;
             const topicEvidenceIds = Array.from(
               new Set([
                 ...facts.flatMap((fact) => fact.evidenceIds),

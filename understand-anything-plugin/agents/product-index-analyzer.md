@@ -22,7 +22,7 @@ model: inherit
 - `candidateFiles`：允许使用的候选文件。
 - `candidateFiles[].fileId`：输出中可引用的文件 ID。
 - `candidateFiles[].anchors[].anchorId`：输出 facts 可引用的证据锚点。
-- `candidateFiles[].anchors[]`：锚点的类型、文本、节点、符号、行号和摘要。
+- `candidateFiles[].anchors[]`：锚点的 **证据信号类型**（`signalType`，如 `entry`/`display`）、文本、节点、符号、行号和摘要。
 - `overflowFiles`：超出上下文预算的文件，只能记录为忽略原因，不能从中抽取事实。
 
 ## 输出
@@ -61,7 +61,7 @@ model: inherit
 
 `facts[]` 必须包含：
 
-- `type`：只能使用 `behavior`、`rule`、`display`、`data`、`integration`、`mapping`、`lifecycle`。
+- `type`：只能使用 `behavior`、`rule`、`display`、`data`、`integration`、`mapping`、`lifecycle`。**禁止**把 `anchors[].signalType`（如 `entry`）直接抄到 `facts[].type`；`entry` 是证据信号，入口类事实应写 `behavior` 或 `lifecycle`。
 - `text`：**产品层事实，不是代码解释**。
 - `conditions`：字符串数组，没有条件时用空数组。
 - `evidenceRefs`：非空数组，只能引用输入中已有的 `anchorId`。
@@ -71,7 +71,7 @@ model: inherit
 
 一个Fact可以是：
 - **用户目标**：用户通过它完成一个明确小目标，例如播放、暂停、切换清晰度、领取权益、提交反馈；输出 type 通常用 `behavior`。
-- **独立入口或触发**：有明确入口、按钮、菜单项、自动触发条件、页面曝光、状态变化或运营配置触发；输出 type 通常用 `behavior` 或 `lifecycle`。
+- **独立入口或触发**：有明确入口、按钮、菜单项、自动触发条件、页面曝光、状态变化或运营配置触发；输出 type 用 `behavior` 或 `lifecycle`（即使证据锚点的 `signalType` 为 `entry`）。
 - **展示对象**：有独立页面区域、弹窗、面板、卡片、提示、列表、结果页或状态文案；输出 type 用 `display`。
 - **操作行为**：用户可以执行一组操作，并得到明确反馈或结果；输出 type 用 `behavior`。
 - **业务流程**：有可描述的状态流转，例如页面加载流程、数据处理过程；输出 type 用 `lifecycle`。

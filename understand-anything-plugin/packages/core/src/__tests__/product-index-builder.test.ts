@@ -737,7 +737,7 @@ describe("product index builder", () => {
     expect(index.evidence.map((evidence) => evidence.nodeId)).toEqual(
       expect.arrayContaining([playerActivityId, castManagerId]),
     );
-    expect(index.facts).toEqual([]);
+    expect(index.topics.every((topic) => topic.facts.length === 0)).toBe(true);
     expect(index.coverage).toMatchObject({
       platformProfiles: ["android"],
       entryPoints: 6,

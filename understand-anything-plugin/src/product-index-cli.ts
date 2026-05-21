@@ -25,6 +25,7 @@ import {
   buildProductBoundaryCandidates,
   buildTopicContextPacks,
   finalizeGroundedProductIndex,
+  normalizeLoadedContextPacks,
   type ProductBoundaryCandidate,
   type TopicContextPack,
 } from "../packages/core/dist/product-index-builder.js";
@@ -186,9 +187,11 @@ export async function runProductIndexCli(
       topicNormalizationPath,
       "product-topic-normalization.json not found. LLM topic normalizer did not write normalization output.",
     );
-    const contextPacks = readJsonFile<TopicContextPack[]>(
-      contextPacksPath,
-      "product-context-packs.json not found. 请先运行 /understand-product --build-context-packs。",
+    const contextPacks = normalizeLoadedContextPacks(
+      readJsonFile<TopicContextPack[]>(
+        contextPacksPath,
+        "product-context-packs.json not found. 请先运行 /understand-product --build-context-packs。",
+      ),
     );
     const extractionsData = readProductExtractions(
       extractionsByTopicDir,
@@ -202,6 +205,7 @@ export async function runProductIndexCli(
       ...topicValidation.warnings,
       ...extractionValidation.warnings,
     ];
+    const finalizeWarnings = [...validationWarnings];
     const index = finalizeGroundedProductIndex({
       graph,
       topics,
@@ -209,6 +213,7 @@ export async function runProductIndexCli(
       extractions: extractionValidation.extractions,
       options: builderOptions,
       validationWarnings,
+      warningsSink: finalizeWarnings,
     });
     if (options.shardId) {
       writeJson(getProductIndexPath(options.projectRoot, options.shardId), index);
@@ -224,9 +229,12 @@ export async function runProductIndexCli(
         topicNormalization: topicValidation.normalization,
         contextPacks,
         extractions: extractionValidation.extractions,
-        warnings: index.coverage.warnings.map(toPipelineWarning),
+        warnings: finalizeWarnings.map(toPipelineWarning),
       }),
     );
+    if (options.shardId) {
+      refreshProductShardedManifest(options.projectRoot);
+    }
 
     return {
       projectRoot: options.projectRoot,
@@ -235,7 +243,7 @@ export async function runProductIndexCli(
       contextPacksPath,
       tracePath,
       topics: index.topics.length,
-      facts: index.facts.length,
+      facts: index.topics.reduce((count, topic) => count + topic.facts.length, 0),
       evidence: index.evidence.length,
       signals: businessSignalCount,
       contextPacks: contextPacks.length,
