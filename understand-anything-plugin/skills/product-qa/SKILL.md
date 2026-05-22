@@ -1,22 +1,22 @@
 ---
 name: product-qa
-description: 用于回答基于 Understand-Anything 产品产物的产品问题、业务规则、页面行为、功能入口、展示条件、集成行为、埋点、SDK 回调、Push、同步、投屏、下载或用户流程问题。
+description: 用于回答产品问题，如业务规则、页面行为、功能入口、展示条件、集成行为、埋点等。
 argument-hint: [问题]
 ---
 
 # /product-qa
 
-优先使用 `.understand-anything/product-index.json` 回答产品问题；流程类问题用 `domain-graph.json` 补充业务路径；需要验证事实或兜底检索时使用 `knowledge-graph.json`。
+ - **适合回答本项目的产品细节类问题**，如：“首页的加载流程是什么样的”
+ - **不适合回答概念类问题**，如：“首页的加载流程是什么样的”
 
 ## 产物定位
 
 | 产物 | 定位 | 使用时机 |
 |---|---|---|
 | `.understand-anything/product-index.json` | 产品知识索引。包含产品 Topic、Fact、Evidence、别名、置信度，以及可回溯的证据。 | 用户询问产品行为、功能入口、展示条件、业务规则、用户可见状态、后台能力、SDK 回调、Push、同步、投屏、下载、埋点或集成行为时优先使用。 |
-| `.understand-anything/domain-graph.json` | 业务流程图谱。包含业务域、流程、步骤和跨业务关系。 | 用户询问流程、用户路径、状态流转、前置条件、后续影响，或一个业务动作如何连接到另一个业务动作时使用。 |
 | `.understand-anything/knowledge-graph.json` | 结构代码图谱。包含文件、符号、摘要、分层和关系。 | 需要验证 product-index 的 Evidence、把 `nodeId` 解析到源文件、顺着相邻关系补查，或 product-index 没有有效命中时兜底使用。 |
 
-不要生成或更新这些产物。如果某个产物缺失，继续使用可用产物；只有当缺失会影响结论置信度时，才在回答中说明限制。
+在本Skill中，不要生成或更新这些产物。如果某个产物缺失，继续使用可用产物；只有当缺失会影响结论置信度时，才在回答中说明限制。
 
 ## 产品问答流程
 
@@ -91,37 +91,6 @@ argument-hint: [问题]
    - 读取最小必要源文件。
 2. 保持 `product-qa` 的回答风格。即使是兜底路径，也要用产品语言回答，不要变成代码解释。
 3. **如果 knowledge graph 也无法支撑答案，Agent应使用常规的代码搜索和定位手段继续查找和回答问题**
-
-
-
-### 5. 流程类问题使用 Domain Graph （可选）
-
-对于流程类问题，使用 `domain-graph.json` 的方式要参考 `/understand-chat` 使用 `knowledge-graph.json` 的方式：先搜索相关节点，再沿图关系查上下文。
-
-能从产品上下文进入时，优先从产品上下文进入：
-
-- 如果命中的 Topic 有 `domainRefs`，优先使用这些节点。
-- 如果没有 `domainRefs`，再用问题关键词搜索 domain graph。
-
-检查 domain graph 形态：
-
-- 如果不存在，继续回答，但没有流程图谱辅助。
-- 如果 `kind` 是 `domain-sharded`，把它当作 manifest。优先选择与当前 product shard 关联的 domain shard。如果无法推断 shard，询问用户业务区域或 shard。
-- 如果是完整 graph，直接搜索 `nodes[]` 和 `edges[]`。
-
-搜索 domain 节点时关注：
-
-- 节点 `type`：`domain`、`flow`、`step`。
-- `name`、`summary`、`tags` 和 `languageNotes`。
-- 如果存在，也搜索 `domainMeta.entities`、`domainMeta.businessRules`、`domainMeta.crossDomainInteractions`、`domainMeta.entryPoint` 和 `domainMeta.entryType`。
-
-找到候选节点后，继续查边：
-
-- `contains_flow`：从业务域找到流程。
-- `flow_step`：从流程找到有序步骤；如果有 edge weight 或顺序信息，用它还原步骤顺序。
-- `cross_domain`：查找相关业务域或跨域交接。
-
-domain graph 只用于补充业务顺序和上下游关系。产品规则和用户可见行为仍以 product-index 为主。
 
 
 ## 回答风格

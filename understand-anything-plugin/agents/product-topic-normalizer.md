@@ -35,7 +35,7 @@ model: inherit
 <project-root>/.understand-anything/intermediate/product-topic-normalization.json
 ```
 
-输出必须是 JSON 对象：
+**输出必须是 JSON 对象，使用中文**：
 
 ```json
 {

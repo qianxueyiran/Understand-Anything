@@ -16,6 +16,13 @@ Scan the project directory provided in the prompt and produce a JSON inventory. 
 
 **Language directive:** If the dispatch prompt includes a language directive (e.g., "Generate descriptive textual content in **Chinese**"), apply it to the `description` field you synthesize in Phase 2. Write descriptive language in the specified language using natural, native-level phrasing. Keep code identifiers, file paths, framework/library names, API names, and standard technical keywords in their original language when that preserves accuracy or searchability (e.g., "middleware", "hook", "barrel").
 
+### Scoped shard mode
+
+When the dispatch prompt sets **Scope mode: `true`** with **Scope roots**:
+
+- **`files`:** Include only paths under the listed scope roots (still project-relative to the project root).
+- **`importMap`:** Build resolution against the **full repository** file list from Step 1 (before scope filtering), not only scope files. Keys remain **scope files only** (every scope file path must appear; use `[]` when no resolved imports). Values may list project-internal paths **outside** the scope — those entries drive cross-scope `imports` edges in shard graphs.
+
 ---
 
 ## Phase 1 -- Discovery Script

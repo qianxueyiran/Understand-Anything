@@ -9,7 +9,8 @@ Called at the end of Phase 2 of /understand. Phase 3 (ASSEMBLE REVIEW)
 then reviews the output for semantic issues the script cannot catch.
 
 Usage:
-    python merge-batch-graphs.py <project-root> [--allow-external-edges]
+    python merge-batch-graphs.py <project-root> [--output <path>]
+    python merge-batch-graphs.py <project-root> --import-recovery-only --graph <path>
 
 Input:
     <project-root>/.understand-anything/intermediate/batch-*.json
@@ -747,11 +748,23 @@ def link_tests(
     return added, dropped, tagged, swapped
 
 
+# ── Shard output detection ─────────────────────────────────────────────────
+
+def is_shard_merge_output(path: Path) -> bool:
+    normalized = str(path).replace("\\", "/")
+    if "/.understand-anything/shards/" in normalized:
+        return True
+    return (
+        "/intermediate/sharded/" in normalized
+        and normalized.endswith("candidate-shard.json")
+    )
+
+
 # ── Main merge + normalize ────────────────────────────────────────────────
 
 def merge_and_normalize(
     batches: list[dict[str, Any]],
-    allow_external_edges: bool = False,
+    preserve_external: bool = False,
 ) -> tuple[dict[str, Any], list[str]]:
     """Merge batch results and normalize. Returns (assembled_graph, report_lines)."""
 
@@ -876,9 +889,8 @@ def merge_and_normalize(
                 missing.append("source")
             if not valid_tgt or tgt not in node_ids:
                 missing.append("target")
-            if allow_external_edges and valid_src and valid_tgt:
+            if preserve_external and valid_src and valid_tgt:
                 edge["external"] = True
-                edge["externalReason"] = f"missing {' and '.join(missing)} in current shard"
             else:
                 missing_details = []
                 if not valid_src or src not in node_ids:
@@ -990,6 +1002,7 @@ def merge_and_normalize(
 def recover_imports_from_scan(
     assembled: dict[str, Any],
     scan_result_path: Path,
+    preserve_external: bool = False,
 ) -> tuple[int, list[str]]:
     """Re-emit any `imports` edges that exist in `scan-result.json#importMap`
     but never made it into a batch's output. The project-scanner's importMap
@@ -1025,6 +1038,7 @@ def recover_imports_from_scan(
             existing.add((edge.get("source", ""), edge.get("target", "")))
 
     recovered = 0
+    recovered_external = 0
     skipped_no_src_node = 0
     skipped_no_tgt_node = 0
     for src_path, targets in import_map.items():
@@ -1040,7 +1054,25 @@ def recover_imports_from_scan(
                 continue
             tgt_id = f"file:{tgt_path}"
             if tgt_id not in file_node_ids:
-                skipped_no_tgt_node += 1
+                if preserve_external:
+                    if src_id == tgt_id:
+                        continue
+                    if (src_id, tgt_id) in existing:
+                        continue
+                    assembled["edges"].append({
+                        "source": src_id,
+                        "target": tgt_id,
+                        "type": "imports",
+                        "direction": "forward",
+                        "weight": 0.7,
+                        "external": True,
+                        "recoveredFromImportMap": True,
+                    })
+                    existing.add((src_id, tgt_id))
+                    recovered += 1
+                    recovered_external += 1
+                else:
+                    skipped_no_tgt_node += 1
                 continue
             if src_id == tgt_id:
                 continue
@@ -1072,6 +1104,10 @@ def recover_imports_from_scan(
             f"  Skipped {skipped_no_tgt_node} importMap target paths "
             f"with no `file:` node in graph"
         )
+    if recovered_external:
+        lines.append(
+            f"  Recovered {recovered_external} external `imports` edges from importMap"
+        )
     return recovered, lines
 
 
@@ -1083,22 +1119,77 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     )
     parser.add_argument("project_root")
     parser.add_argument(
-        "--allow-external-edges",
+        "--import-recovery-only",
         action="store_true",
-        help="Preserve edges whose source or target is outside the current shard.",
+        help="Only recover imports edges from scan-result.json into --graph (no batch merge).",
+    )
+    parser.add_argument(
+        "--graph",
+        default=None,
+        help="Graph JSON path for --import-recovery-only.",
+    )
+    parser.add_argument(
+        "--intermediate-dir",
+        default=None,
+        help="Read batch-*.json and scan-result.json from this directory instead of the default project intermediate directory.",
+    )
+    parser.add_argument(
+        "--output",
+        default=None,
+        help="Write the assembled graph to this path instead of intermediate/assembled-graph.json.",
     )
     return parser.parse_args(argv)
+
+
+def run_import_recovery_only(project_root: Path, graph_path: Path) -> None:
+    if not graph_path.is_file():
+        print(f"Error: graph file does not exist: {graph_path}", file=sys.stderr)
+        sys.exit(1)
+
+    preserve_external = is_shard_merge_output(graph_path)
+    assembled = json.loads(graph_path.read_text(encoding="utf-8"))
+    scan_result_path = project_root / ".understand-anything" / "intermediate" / "scan-result.json"
+    recovered, recovery_report = recover_imports_from_scan(
+        assembled,
+        scan_result_path,
+        preserve_external=preserve_external,
+    )
+
+    print("", file=sys.stderr)
+    print("Imports edge recovery:", file=sys.stderr)
+    for line in recovery_report:
+        print(line, file=sys.stderr)
+
+    graph_path.write_text(json.dumps(assembled, indent=2, ensure_ascii=False), encoding="utf-8")
+    print(f"\nUpdated {graph_path}", file=sys.stderr)
+    if recovered:
+        print(f"  Recovered {recovered} imports edges", file=sys.stderr)
 
 
 def main() -> None:
     args = parse_args(sys.argv[1:])
 
     project_root = Path(args.project_root).resolve()
-    intermediate_dir = project_root / ".understand-anything" / "intermediate"
+
+    if args.import_recovery_only:
+        if not args.graph:
+            print("Error: --import-recovery-only requires --graph <path>", file=sys.stderr)
+            sys.exit(1)
+        run_import_recovery_only(project_root, Path(args.graph).resolve())
+        return
+
+    intermediate_dir = (
+        Path(args.intermediate_dir).resolve()
+        if args.intermediate_dir
+        else project_root / ".understand-anything" / "intermediate"
+    )
 
     if not intermediate_dir.is_dir():
         print(f"Error: {intermediate_dir} does not exist", file=sys.stderr)
         sys.exit(1)
+
+    output_path = Path(args.output).resolve() if args.output else intermediate_dir / "assembled-graph.json"
+    preserve_external = is_shard_merge_output(output_path)
 
     # Discover batch files, sorted by numeric index (not lexicographic)
     batch_files = sorted(
@@ -1130,14 +1221,20 @@ def main() -> None:
     # Merge and normalize
     assembled, report = merge_and_normalize(
         batches,
-        allow_external_edges=args.allow_external_edges,
+        preserve_external=preserve_external,
     )
 
     # Recover any imports edges file-analyzer batches dropped despite
     # `batchImportData` containing them. The project-scanner's importMap
     # is the deterministic source of truth.
     scan_result_path = intermediate_dir / "scan-result.json"
-    recovered, recovery_report = recover_imports_from_scan(assembled, scan_result_path)
+    if not scan_result_path.is_file():
+        scan_result_path = project_root / ".understand-anything" / "intermediate" / "scan-result.json"
+    recovered, recovery_report = recover_imports_from_scan(
+        assembled,
+        scan_result_path,
+        preserve_external=preserve_external,
+    )
     if recovery_report:
         report.append("")
         report.append("Imports edge recovery:")
@@ -1149,7 +1246,7 @@ def main() -> None:
         print(line, file=sys.stderr)
 
     # Write output
-    output_path = intermediate_dir / "assembled-graph.json"
+    output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(json.dumps(assembled, indent=2, ensure_ascii=False), encoding="utf-8")
 
     size_kb = output_path.stat().st_size / 1024

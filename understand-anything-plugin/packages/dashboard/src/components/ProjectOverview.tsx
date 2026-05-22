@@ -14,8 +14,9 @@ export default function ProjectOverview() {
     );
   }
 
-  const { project, nodes, edges, layers } = graph;
-  const hasTour = graph.tour.length > 0;
+  const { project, nodes, edges } = graph;
+  const layers = graph.layers ?? [];
+  const hasTour = (graph.tour?.length ?? 0) > 0;
 
   const typeCounts: Record<string, number> = {};
   for (const node of nodes) {

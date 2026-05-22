@@ -45,30 +45,22 @@ Some artifacts are lightweight manifests that point to shard files. If the top-l
   - If top-level `kind` is `codebase-sharded`, do not read it as a full graph.
   - Search with `rg` under `.understand-anything/shards/` by `nodeId`, `filePath`, class name, function/method name, concept name, tag, and summary keywords.
   - Edge `source` and `target` values keep their original addresses. For cross-shard reverse lookup, search those raw `source` / `target` node IDs with `rg` under `.understand-anything/shards/`.
+  - **Cross-scope import edges:** In the shard you are reading, find outbound `imports` edges with `"external": true` (source is in-shard; target is `file:<path>` with no target node). Use `rg` on that `file:` path under `.understand-anything/shards/` to locate the owning shard, then read that shard for the file node and its 1-hop edges. Do not treat external targets as errors or missing nodes.
   - Read only the shard files needed for the matched nodes and their 1-hop edges.
   - If `kind` is not `codebase-sharded`, use the legacy complete knowledge graph flow below.
 
 ## Instructions
-
-0. 如果 `.understand-anything/product-index.json` 存在，并且用户问题涉及页面、入口、按钮、标签、展示条件、业务规则、后台能力、投屏、同步、下载、Push、埋点、SDK 回调等产品问题，优先检索 product index。先检查顶层 `kind`：
-   - 如果是 `product-sharded`，不要把 `.understand-anything/product-index.json` 当完整 product index 读取。先读 manifest 的 `shards[].path`，再用 `rg` 在 `.understand-anything/product-shards/` 中搜索用户问题关键词；命中后只读相关 shard。命中 product topic/fact 后，用 evidence 的 `nodeId` 或 `filePath` 反查 codebase graph；如果 codebase graph 是 `codebase-sharded`，按下面的分片 graph 规则用 `rg` 反查。
-   - 如果不是 `product-sharded`，按旧流程检索完整 product index。命中 product topic/fact 后，用 evidence 的 `nodeId` 或 `filePath` 反查 `knowledge-graph.json`，再回答。
-   - 如果 evidence 是 inferred、uncertain、seeded、indexed 或候选信号，要明确说明证据较弱或仅定位到候选代码。
-
-0a. 如果 `.understand-anything/domain-graph.json` 存在，并且用户问题涉及业务域、流程、topic、能力边界、角色或跨页面业务链路，先检查顶层 `kind`：
-   - 如果是 `domain-sharded`，不要把 `.understand-anything/domain-graph.json` 当完整 domain graph 读取。用 `rg` 在 `.understand-anything/domain-shards/` 中搜索 domain/topic/flow 关键词，并只读相关 shard。
-   - 如果不是 `domain-sharded`，按旧流程读取或检索完整 domain graph 的相关部分。
-   - 命中 domain evidence 后，再用其中的 `nodeId`、`filePath`、topic、flow 或代码实体名反查 codebase graph；如果 codebase graph 是 `codebase-sharded`，通过 `.understand-anything/shards/` 做 `rg` 检索。
 
 1. Check that `.understand-anything/knowledge-graph.json` exists in the current project root. If not, tell the user to run `/understand` first.
 
 2. **Read project metadata only** — first inspect the top-level `kind` and project metadata. If `.understand-anything/knowledge-graph.json` is `codebase-sharded`, read only the manifest metadata and shard list; do not read it as the full graph. Otherwise, use Grep or Read with a line limit to extract just the `"project"` section from the top of the file for context (name, description, languages, frameworks).
 
 3. **Search for relevant nodes** — use Grep to search the knowledge graph file for the user's query keywords: "$ARGUMENTS"
-   - For `codebase-sharded`, use `rg` under `.understand-anything/shards/` by `nodeId`, `filePath`, class name, method/function name, `"name"`, `"summary"`, `"tags"`, and semantic keywords. Read only matching shards.
+   - For `codebase-sharded`, use `rg` under `.understand-anything/shards/` by `nodeId`, `filePath`, class name, method/function name, `"name"`, `"summary"`, `"tags"`, `"businessSignals"`,and semantic keywords. Read only matching shards.
    - For a complete graph, search `"name"` fields: `grep -i "query_keyword"` in the graph file
    - For a complete graph, search `"summary"` fields for semantic matches
    - For a complete graph, search `"tags"` arrays for topic matches
+   - For a complete graph, search `"businessSignals"` arrays for business matches
    - Note the `id` values of all matching nodes
 
 4. **Find connected edges** — for each matched node ID, Grep for that ID in the `edges` section to find:
@@ -76,6 +68,7 @@ Some artifacts are lightweight manifests that point to shard files. If the top-l
    - What calls or imports it (upstream)
    - This gives you the 1-hop subgraph around the query
    - For `codebase-sharded`, keep edge `source` / `target` values as raw node IDs and use `rg` under `.understand-anything/shards/` for cross-shard reverse lookup
+   - For outbound `external: true` `imports` edges, follow the target `file:` path into other shards as above instead of stopping at the path string
 
 5. **Read layer context** — Grep for `"layers"` to understand which architectural layers the matched nodes belong to. For `codebase-sharded`, search layer IDs, layer names, or matched node IDs under `.understand-anything/shards/` instead of reading the full graph.
 

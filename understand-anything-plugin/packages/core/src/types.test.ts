@@ -15,16 +15,14 @@ describe("KnowledgeGraph types", () => {
       },
       nodes: [],
       edges: [],
-      layers: [],
-      tour: [],
     };
 
     expect(graph.version).toBe("1.0.0");
     expect(graph.project.name).toBe("test-project");
     expect(graph.nodes).toHaveLength(0);
     expect(graph.edges).toHaveLength(0);
-    expect(graph.layers).toHaveLength(0);
-    expect(graph.tour).toHaveLength(0);
+    expect(graph.layers).toBeUndefined();
+    expect(graph.tour).toBeUndefined();
   });
 
   it("should create valid GraphNodes with all fields", () => {

@@ -1,4 +1,5 @@
 export * from "./types.js";
+export * from "./incremental-update.js";
 export * from "./sharded-manifest.js";
 export * from "./sharded-update.js";
 export * from "./persistence/index.js";

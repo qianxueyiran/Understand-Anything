@@ -81,7 +81,7 @@ function buildGraphIndexes(graph: KnowledgeGraph): {
   for (const node of graph.nodes) nodesById.set(node.id, node);
   const nodeIdToLayerId = new Map<string, string>();
   const nodeIdToLayerIds = new Map<string, Set<string>>();
-  for (const layer of graph.layers) {
+  for (const layer of graph.layers ?? []) {
     for (const nid of layer.nodeIds) {
       if (!nodeIdToLayerId.has(nid)) nodeIdToLayerId.set(nid, layer.id);
       let set = nodeIdToLayerIds.get(nid);

@@ -148,9 +148,13 @@ export const DIRECTION_ALIASES: Record<string, string> = {
 export function sanitizeGraph(data: Record<string, unknown>): Record<string, unknown> {
   const result = { ...data };
 
-  // Null → empty array for top-level collections
-  if (data.tour === null || data.tour === undefined) result.tour = [];
-  if (data.layers === null || data.layers === undefined) result.layers = [];
+  // Omit legacy layers/tour when absent or empty
+  if (data.tour === null || data.tour === undefined || (Array.isArray(data.tour) && data.tour.length === 0)) {
+    delete result.tour;
+  }
+  if (data.layers === null || data.layers === undefined || (Array.isArray(data.layers) && data.layers.length === 0)) {
+    delete result.layers;
+  }
 
   // Sanitize nodes
   if (Array.isArray(data.nodes)) {
@@ -439,8 +443,8 @@ export const KnowledgeGraphSchema = z.object({
   project: ProjectMetaSchema,
   nodes: z.array(GraphNodeSchema),
   edges: z.array(GraphEdgeSchema),
-  layers: z.array(LayerSchema),
-  tour: z.array(TourStepSchema),
+  layers: z.array(LayerSchema).optional(),
+  tour: z.array(TourStepSchema).optional(),
 });
 
 export interface GraphIssue {
@@ -561,7 +565,7 @@ export function validateGraph(data: unknown): ValidationResult {
   const { data: fixed, issues } = autoFixGraph(normalized);
 
   // Tier 4: Fatal — malformed top-level collections
-  const requiredCollections = ["nodes", "edges", "layers", "tour"] as const;
+  const requiredCollections = ["nodes", "edges"] as const;
   for (const collection of requiredCollections) {
     if (collection in fixed && fixed[collection] !== undefined && !Array.isArray(fixed[collection])) {
       const issue = buildInvalidCollectionIssue(collection);
@@ -711,14 +715,18 @@ export function validateGraph(data: unknown): ValidationResult {
     }
   }
 
-  const graph = {
+  const graph: Record<string, unknown> = {
     version: typeof fixed.version === "string" ? fixed.version : "1.0.0",
     project: projectResult.data,
     nodes: validNodes,
     edges: validEdges,
-    layers: validLayers,
-    tour: validTour,
   };
+  if (validLayers.length > 0) {
+    graph.layers = validLayers;
+  }
+  if (validTour.length > 0) {
+    graph.tour = validTour;
+  }
 
-  return { success: true, data: graph, issues, errors: buildErrors(issues) };
+  return { success: true, data: graph as z.infer<typeof KnowledgeGraphSchema>, issues, errors: buildErrors(issues) };
 }

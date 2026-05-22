@@ -863,13 +863,13 @@ class MergeIntegrationTests(unittest.TestCase):
             ],
         }
 
-        assembled, report = mbg.merge_and_normalize([batch], allow_external_edges=True)
+        assembled, report = mbg.merge_and_normalize([batch], preserve_external=True)
 
         self.assertEqual(len(assembled["edges"]), 1)
         edge = assembled["edges"][0]
         self.assertEqual(edge["target"], "file:src/external.ts")
         self.assertTrue(edge["external"])
-        self.assertEqual(edge["externalReason"], "missing target in current shard")
+        self.assertNotIn("externalReason", edge)
         self.assertTrue(
             any("external edges preserved" in line for line in report),
             "\n".join(report),
@@ -898,7 +898,7 @@ class MergeIntegrationTests(unittest.TestCase):
             ],
         }
 
-        assembled, report = mbg.merge_and_normalize([batch], allow_external_edges=True)
+        assembled, report = mbg.merge_and_normalize([batch], preserve_external=True)
 
         self.assertEqual(assembled["edges"], [])
         self.assertFalse(
@@ -963,7 +963,7 @@ class MergeIntegrationTests(unittest.TestCase):
             ],
         }
 
-        assembled, report = mbg.merge_and_normalize([batch], allow_external_edges=True)
+        assembled, report = mbg.merge_and_normalize([batch], preserve_external=True)
 
         self.assertEqual(len(assembled["edges"]), 1)
         self.assertTrue(assembled["edges"][0]["external"])
@@ -972,11 +972,66 @@ class MergeIntegrationTests(unittest.TestCase):
             "\n".join(report),
         )
 
-    def test_cli_accepts_allow_external_edges_flag(self) -> None:
-        args = mbg.parse_args(["/tmp/project", "--allow-external-edges"])
+    def test_is_shard_merge_output_detects_shard_paths(self) -> None:
+        self.assertTrue(
+            mbg.is_shard_merge_output(
+                Path("/proj/.understand-anything/shards/home.json"),
+            ),
+        )
+        self.assertTrue(
+            mbg.is_shard_merge_output(
+                Path("/proj/.understand-anything/intermediate/sharded/home/candidate-shard.json"),
+            ),
+        )
+        self.assertFalse(
+            mbg.is_shard_merge_output(
+                Path("/proj/.understand-anything/intermediate/assembled-graph.json"),
+            ),
+        )
+
+    def test_cli_accepts_import_recovery_only_flag(self) -> None:
+        args = mbg.parse_args(
+            [
+                "/tmp/project",
+                "--import-recovery-only",
+                "--graph",
+                "/tmp/project/.understand-anything/intermediate/sharded/home/candidate-shard.json",
+            ],
+        )
 
         self.assertEqual(args.project_root, "/tmp/project")
-        self.assertIs(args.allow_external_edges, True)
+        self.assertTrue(args.import_recovery_only)
+        self.assertEqual(
+            args.graph,
+            "/tmp/project/.understand-anything/intermediate/sharded/home/candidate-shard.json",
+        )
+
+    def test_cli_accepts_custom_intermediate_and_output_paths(self) -> None:
+        args = mbg.parse_args(
+            [
+                "/tmp/project",
+                "--intermediate-dir",
+                "/tmp/project/.understand-anything/intermediate/sharded/home",
+                "--output",
+                "/tmp/project/.understand-anything/intermediate/sharded/home/assembled-graph.json",
+            ]
+        )
+
+        self.assertEqual(args.project_root, "/tmp/project")
+        self.assertEqual(
+            args.intermediate_dir,
+            "/tmp/project/.understand-anything/intermediate/sharded/home",
+        )
+        self.assertEqual(
+            args.output,
+            "/tmp/project/.understand-anything/intermediate/sharded/home/assembled-graph.json",
+        )
+
+    def test_cli_defaults_keep_existing_intermediate_and_output_behavior(self) -> None:
+        args = mbg.parse_args(["/tmp/project"])
+
+        self.assertIsNone(args.intermediate_dir)
+        self.assertIsNone(args.output)
 
     def test_linker_runs_during_merge(self) -> None:
         batch = {

@@ -6,13 +6,17 @@ import type { KnowledgeGraph } from "../types.js";
 import {
   buildAffectedShardPlan,
   buildCodeManifestUpdate,
+  buildDomainManifestUpdate,
+  buildProductManifestUpdate,
   buildShardedUpdatePlan,
+  buildTransactionalCodeManifestUpdate,
   classifyAffectedShardChanges,
   hashArtifactFile,
   pruneGraphForChangedFiles,
   saveShardedUpdatePlan,
   type CodebaseShardedManifest,
 } from "../sharded-update.js";
+import type { DomainShardedManifest, ProductShardedManifest } from "../sharded-manifest.js";
 import type { FingerprintStore } from "../fingerprint.js";
 import type { PluginRegistry } from "../plugins/registry.js";
 
@@ -118,6 +122,239 @@ describe("sharded update manifest metadata", () => {
 
     expect(update.shards).toEqual({});
     expect(update.warnings).toEqual(["Skipped invalid shard id: ../bad"]);
+  });
+
+  it("keeps global git commit at base when any requested shard update fails", () => {
+    mkdirSync(join(root, ".understand-anything", "shards"), { recursive: true });
+    writeFileSync(
+      join(root, ".understand-anything", "shards", "home.json"),
+      JSON.stringify({ nodes: [{ id: "file:a_home/Home.kt" }], edges: [] }),
+      "utf-8",
+    );
+    writeFileSync(
+      join(root, ".understand-anything", "shards", "player.json"),
+      JSON.stringify({ nodes: [{ id: "file:a_player/Player.kt" }], edges: [] }),
+      "utf-8",
+    );
+
+    const manifest: CodebaseShardedManifest = {
+      version: "1.0.0",
+      kind: "codebase-sharded",
+      shards: [
+        { id: "home", path: "shards/home.json", scopes: ["a_home"] },
+        { id: "player", path: "shards/player.json", scopes: ["a_player"] },
+      ],
+      warnings: [],
+      update: {
+        gitCommitHash: "base",
+        updatedAt: "2026-05-21T00:00:00.000Z",
+        warnings: [],
+        shards: {
+          home: {
+            artifactHash: "sha256:old-home",
+            fingerprintPath: "fingerprints/shards/home.json",
+          },
+          player: {
+            artifactHash: "sha256:old-player",
+            fingerprintPath: "fingerprints/shards/player.json",
+          },
+        },
+      },
+    };
+
+    const update = buildTransactionalCodeManifestUpdate({
+      projectRoot: root,
+      manifest,
+      headCommitHash: "head",
+      successfulShardIds: ["home"],
+      failedShardIds: ["player"],
+      warnings: ["player failed"],
+      now: "2026-05-22T00:00:00.000Z",
+    });
+
+    expect(update.gitCommitHash).toBe("base");
+    expect(update.shards.home.artifactHash).toBe(
+      hashArtifactFile(join(root, ".understand-anything", "shards", "home.json")),
+    );
+    expect(update.shards.player.artifactHash).toBe("sha256:old-player");
+    expect(update.warnings).toContain("player failed");
+  });
+
+  it("advances global git commit only when all requested code shards succeed", () => {
+    mkdirSync(join(root, ".understand-anything", "shards"), { recursive: true });
+    writeFileSync(
+      join(root, ".understand-anything", "shards", "home.json"),
+      JSON.stringify({ nodes: [{ id: "file:a_home/Home.kt" }], edges: [] }),
+      "utf-8",
+    );
+    writeFileSync(
+      join(root, ".understand-anything", "shards", "player.json"),
+      JSON.stringify({ nodes: [{ id: "file:a_player/Player.kt" }], edges: [] }),
+      "utf-8",
+    );
+
+    const manifest: CodebaseShardedManifest = {
+      version: "1.0.0",
+      kind: "codebase-sharded",
+      shards: [
+        { id: "home", path: "shards/home.json", scopes: ["a_home"] },
+        { id: "player", path: "shards/player.json", scopes: ["a_player"] },
+      ],
+      warnings: [],
+      update: {
+        gitCommitHash: "base",
+        updatedAt: "2026-05-21T00:00:00.000Z",
+        warnings: ["old warning"],
+        shards: {
+          home: {
+            artifactHash: "sha256:old-home",
+            fingerprintPath: "fingerprints/shards/home.json",
+          },
+          player: {
+            artifactHash: "sha256:old-player",
+            fingerprintPath: "fingerprints/shards/player.json",
+          },
+        },
+      },
+    };
+
+    const update = buildTransactionalCodeManifestUpdate({
+      projectRoot: root,
+      manifest,
+      headCommitHash: "head",
+      successfulShardIds: ["home", "player"],
+      failedShardIds: [],
+      warnings: [],
+      now: "2026-05-22T00:00:00.000Z",
+    });
+
+    expect(update.gitCommitHash).toBe("head");
+    expect(update.shards.home.artifactHash).toBe(
+      hashArtifactFile(join(root, ".understand-anything", "shards", "home.json")),
+    );
+    expect(update.shards.player.artifactHash).toBe(
+      hashArtifactFile(join(root, ".understand-anything", "shards", "player.json")),
+    );
+    expect(update.warnings).toEqual([]);
+  });
+
+  it("builds domain update metadata for rebuilt shards only", () => {
+    mkdirSync(join(root, ".understand-anything", "domain-shards"), { recursive: true });
+    writeFileSync(
+      join(root, ".understand-anything", "domain-shards", "home.json"),
+      JSON.stringify({ nodes: [{ id: "flow:home" }], edges: [] }),
+      "utf-8",
+    );
+
+    const manifest: DomainShardedManifest = {
+      version: "1.0.0",
+      kind: "domain-sharded",
+      source: { codeManifest: "knowledge-graph.json" },
+      shards: [
+        { id: "home", path: "domain-shards/home.json", sourceCodeShard: "shards/home.json" },
+        { id: "player", path: "domain-shards/player.json", sourceCodeShard: "shards/player.json" },
+      ],
+      warnings: [],
+      update: {
+        updatedAt: "2026-05-21T00:00:00.000Z",
+        warnings: [],
+        shards: {
+          player: {
+            artifactHash: "sha256:old-player-domain",
+            sourceCodeArtifactHash: "sha256:old-player-code",
+            lastRebuiltAt: "2026-05-21T00:00:00.000Z",
+          },
+        },
+      },
+    };
+    const codeUpdate = {
+      gitCommitHash: "head",
+      updatedAt: "2026-05-22T00:00:00.000Z",
+      warnings: [],
+      shards: {
+        home: { artifactHash: "sha256:home-code" },
+        player: { artifactHash: "sha256:player-code" },
+      },
+    };
+
+    const update = buildDomainManifestUpdate(
+      root,
+      manifest,
+      ["home"],
+      codeUpdate,
+      "2026-05-22T00:00:00.000Z",
+    );
+
+    expect(update.shards.home.artifactHash).toBe(
+      hashArtifactFile(join(root, ".understand-anything", "domain-shards", "home.json")),
+    );
+    expect(update.shards.home.sourceCodeArtifactHash).toBe("sha256:home-code");
+    expect(update.shards.home.lastRebuiltAt).toBe("2026-05-22T00:00:00.000Z");
+    expect(update.shards.player.artifactHash).toBe("sha256:old-player-domain");
+  });
+
+  it("builds product update metadata with trace and source artifact hashes", () => {
+    mkdirSync(join(root, ".understand-anything", "product-shards"), { recursive: true });
+    mkdirSync(join(root, ".understand-anything", "product-traces"), { recursive: true });
+    writeFileSync(
+      join(root, ".understand-anything", "product-shards", "home.json"),
+      JSON.stringify({ topics: [{ id: "home" }] }),
+      "utf-8",
+    );
+    writeFileSync(
+      join(root, ".understand-anything", "product-traces", "home.json"),
+      JSON.stringify({ trace: [{ id: "home" }] }),
+      "utf-8",
+    );
+
+    const manifest: ProductShardedManifest = {
+      version: "1.0.0",
+      kind: "product-sharded",
+      source: {
+        codeManifest: "knowledge-graph.json",
+        domainManifest: "domain-graph.json",
+      },
+      shards: [
+        {
+          id: "home",
+          path: "product-shards/home.json",
+          tracePath: "product-traces/home.json",
+          sourceCodeShard: "shards/home.json",
+          sourceDomainShard: "domain-shards/home.json",
+        },
+      ],
+      warnings: [],
+    };
+    const codeUpdate = {
+      gitCommitHash: "head",
+      updatedAt: "2026-05-22T00:00:00.000Z",
+      warnings: [],
+      shards: { home: { artifactHash: "sha256:home-code" } },
+    };
+    const domainUpdate = {
+      updatedAt: "2026-05-22T00:00:00.000Z",
+      warnings: [],
+      shards: { home: { artifactHash: "sha256:home-domain" } },
+    };
+
+    const update = buildProductManifestUpdate(
+      root,
+      manifest,
+      ["home"],
+      codeUpdate,
+      domainUpdate,
+      "2026-05-22T00:00:00.000Z",
+    );
+
+    expect(update.shards.home.artifactHash).toBe(
+      hashArtifactFile(join(root, ".understand-anything", "product-shards", "home.json")),
+    );
+    expect(update.shards.home.traceArtifactHash).toBe(
+      hashArtifactFile(join(root, ".understand-anything", "product-traces", "home.json")),
+    );
+    expect(update.shards.home.sourceCodeArtifactHash).toBe("sha256:home-code");
+    expect(update.shards.home.sourceDomainArtifactHash).toBe("sha256:home-domain");
+    expect(update.shards.home.lastRebuiltAt).toBe("2026-05-22T00:00:00.000Z");
   });
 });
 

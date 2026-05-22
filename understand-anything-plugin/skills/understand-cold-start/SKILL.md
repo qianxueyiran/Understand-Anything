@@ -8,11 +8,9 @@ argument-hint: [--config <path>] [--resume] [--continue-on-error]
 
 根据用户维护的分片配置，为大型项目建立第一批分析产物。这个 skill 只做编排：读取配置、按顺序执行已有分片命令，然后校验生成的 code graph 和 product index 产物。
 
-第一版**不执行** `/understand-domain --shard <id>`。如果对应的 domain shard 不存在，`/understand-product --shard <id>` 可以跳过 domain context，不因此阻塞流程。
-
 ## 配置
 
-默认配置路径是 `.understand-anything/scope-shards.json`。`--config <path>` 可以覆盖默认路径。除非传入绝对路径，否则配置路径相对 `PROJECT_ROOT` 解析。
+默认配置路径是 `.understand-anything/scope-shards.json`。`--config <path>` 可以覆盖默认路径。除非传入绝对路径，否则配置路径为项目根目录。
 
 ```json
 {

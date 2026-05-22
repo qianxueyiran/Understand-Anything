@@ -1,8 +1,13 @@
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { analyzeChanges, type FingerprintStore } from "./fingerprint.js";
+import type { FingerprintStore } from "./fingerprint.js";
+import {
+  classifyChangedFiles,
+  pruneGraphForChangedFiles as pruneIncrementalGraphForChangedFiles,
+} from "./incremental-update.js";
 import type { PluginRegistry } from "./plugins/registry.js";
+import type { DomainShardedManifest, ProductShardedManifest } from "./sharded-manifest.js";
 import type { KnowledgeGraph } from "./types.js";
 
 const SHARD_ID_PATTERN = /^[A-Za-z0-9_-]+$/;
@@ -112,6 +117,149 @@ export function withCodeManifestUpdate(
   return {
     ...manifest,
     update,
+  };
+}
+
+export interface TransactionalCodeManifestUpdateInput {
+  projectRoot: string;
+  manifest: CodebaseShardedManifest;
+  headCommitHash: string;
+  successfulShardIds: string[];
+  failedShardIds: string[];
+  warnings?: string[];
+  now?: string;
+}
+
+export function buildTransactionalCodeManifestUpdate(
+  input: TransactionalCodeManifestUpdateInput,
+): ManifestUpdateMetadata {
+  const now = input.now ?? new Date().toISOString();
+  const warnings = [...(input.warnings ?? [])];
+  const successfulShardIds = new Set(input.successfulShardIds);
+  const failedShardIds = new Set(input.failedShardIds);
+  const shards: Record<string, ShardUpdateMetadata> = {
+    ...(input.manifest.update?.shards ?? {}),
+  };
+
+  for (const shard of getValidManifestShards(input.manifest, warnings)) {
+    if (!successfulShardIds.has(shard.id)) {
+      continue;
+    }
+
+    const shardPath = join(input.projectRoot, ".understand-anything", shard.path);
+    if (!existsSync(shardPath)) {
+      warnings.push(`${shard.path} is missing; update metadata skipped`);
+      continue;
+    }
+
+    shards[shard.id] = {
+      ...shards[shard.id],
+      artifactHash: hashArtifactFile(shardPath),
+      fingerprintPath:
+        shards[shard.id]?.fingerprintPath ?? `fingerprints/shards/${shard.id}.json`,
+      lastPatchedAt: now,
+    };
+  }
+
+  return {
+    gitCommitHash:
+      failedShardIds.size === 0
+        ? input.headCommitHash
+        : input.manifest.update?.gitCommitHash,
+    updatedAt: now,
+    shards,
+    warnings,
+  };
+}
+
+export function buildDomainManifestUpdate(
+  projectRoot: string,
+  manifest: DomainShardedManifest,
+  rebuiltShardIds: string[],
+  codeUpdate: ManifestUpdateMetadata,
+  now = new Date().toISOString(),
+): ManifestUpdateMetadata {
+  const rebuilt = new Set(rebuiltShardIds);
+  const warnings: string[] = [];
+  const shards: Record<string, ShardUpdateMetadata> = {
+    ...(manifest.update?.shards ?? {}),
+  };
+
+  for (const shard of manifest.shards) {
+    if (!rebuilt.has(shard.id)) {
+      continue;
+    }
+
+    const artifactPath = join(projectRoot, ".understand-anything", shard.path);
+    if (!existsSync(artifactPath)) {
+      warnings.push(`${shard.path} is missing; domain update metadata skipped`);
+      continue;
+    }
+
+    shards[shard.id] = {
+      ...shards[shard.id],
+      artifactHash: hashArtifactFile(artifactPath),
+      sourceCodeArtifactHash: codeUpdate.shards[shard.id]?.artifactHash,
+      lastRebuiltAt: now,
+    };
+  }
+
+  return {
+    updatedAt: now,
+    shards,
+    warnings,
+  };
+}
+
+export function buildProductManifestUpdate(
+  projectRoot: string,
+  manifest: ProductShardedManifest,
+  rebuiltShardIds: string[],
+  codeUpdate: ManifestUpdateMetadata,
+  domainUpdate: ManifestUpdateMetadata | undefined,
+  now = new Date().toISOString(),
+): ManifestUpdateMetadata {
+  const rebuilt = new Set(rebuiltShardIds);
+  const warnings: string[] = [];
+  const shards: Record<string, ShardUpdateMetadata> = {
+    ...(manifest.update?.shards ?? {}),
+  };
+
+  for (const shard of manifest.shards) {
+    if (!rebuilt.has(shard.id)) {
+      continue;
+    }
+
+    const artifactPath = join(projectRoot, ".understand-anything", shard.path);
+    if (!existsSync(artifactPath)) {
+      warnings.push(`${shard.path} is missing; product update metadata skipped`);
+      continue;
+    }
+
+    const update: ShardUpdateMetadata = {
+      ...shards[shard.id],
+      artifactHash: hashArtifactFile(artifactPath),
+      sourceCodeArtifactHash: codeUpdate.shards[shard.id]?.artifactHash,
+      sourceDomainArtifactHash: domainUpdate?.shards[shard.id]?.artifactHash,
+      lastRebuiltAt: now,
+    };
+
+    if (shard.tracePath) {
+      const tracePath = join(projectRoot, ".understand-anything", shard.tracePath);
+      if (existsSync(tracePath)) {
+        update.traceArtifactHash = hashArtifactFile(tracePath);
+      } else {
+        warnings.push(`${shard.tracePath} is missing; trace update metadata skipped`);
+      }
+    }
+
+    shards[shard.id] = update;
+  }
+
+  return {
+    updatedAt: now,
+    shards,
+    warnings,
   };
 }
 
@@ -242,7 +390,7 @@ export interface ClassifyAffectedShardChangesInput {
 export function classifyAffectedShardChanges(
   input: ClassifyAffectedShardChangesInput,
 ): AffectedCodeShard {
-  const analysis = analyzeChanges(
+  const classification = classifyChangedFiles(
     input.projectRoot,
     input.shard.changedFiles,
     input.fingerprintStore,
@@ -251,12 +399,9 @@ export function classifyAffectedShardChanges(
 
   return {
     ...input.shard,
-    structuralFiles: [
-      ...analysis.structurallyChangedFiles,
-      ...analysis.newFiles,
-    ],
-    cosmeticFiles: analysis.cosmeticOnlyFiles,
-    deletedFiles: analysis.deletedFiles,
+    structuralFiles: classification.structuralFiles,
+    cosmeticFiles: classification.cosmeticFiles,
+    deletedFiles: classification.deletedFiles,
   };
 }
 
@@ -265,18 +410,5 @@ export function pruneGraphForChangedFiles(
   structuralFiles: string[],
   deletedFiles: string[],
 ): KnowledgeGraph {
-  const changed = new Set([...structuralFiles, ...deletedFiles]);
-  const removedNodeIds = new Set(
-    graph.nodes
-      .filter((node) => typeof node.filePath === "string" && changed.has(node.filePath))
-      .map((node) => node.id),
-  );
-
-  return {
-    ...graph,
-    nodes: graph.nodes.filter((node) => !removedNodeIds.has(node.id)),
-    edges: graph.edges.filter(
-      (edge) => !removedNodeIds.has(edge.source) && !removedNodeIds.has(edge.target),
-    ),
-  };
+  return pruneIncrementalGraphForChangedFiles(graph, structuralFiles, deletedFiles);
 }

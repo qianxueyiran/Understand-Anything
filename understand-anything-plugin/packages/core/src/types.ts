@@ -108,8 +108,8 @@ export interface KnowledgeGraph {
   project: ProjectMeta;
   nodes: GraphNode[];
   edges: GraphEdge[];
-  layers: Layer[];
-  tour: TourStep[];
+  layers?: Layer[];
+  tour?: TourStep[];
 }
 
 // Theme configuration (for dashboard customization)

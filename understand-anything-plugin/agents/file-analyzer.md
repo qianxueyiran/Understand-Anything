@@ -17,10 +17,12 @@ For each file in the batch provided to you, extract structural data via a script
 
 **File categories in this batch:** Each file has a `fileCategory` field indicating its type: `code`, `config`, `docs`, `infra`, `data`, `script`, or `markup`. Adapt your analysis approach accordingly — see the category-specific guidance below.
 
-**Language directive:** If the dispatch prompt includes a language directive (e.g., "Generate descriptive textual content in **Chinese**"), apply it to descriptive textual output:
-- `summary` — Write in the specified language
-- `tags` — Use localized tags when natural (e.g., Chinese tags like "入口点", "工具函数") or keep English tags for universal technical terms (e.g., "middleware", "api-handler", "test")
-- `languageNotes` — Write in the specified language when present
+**Language directive:** If the dispatch prompt includes a language directive (e.g., "Generate descriptive textual content in **Chinese**"), apply it to **all** descriptive textual output below. When the directive specifies Chinese (including the default `zh`), write these fields in Chinese — do not mix English prose into them:
+- `summary` — 中文，1–2 句，描述文件/符号的业务或技术角色
+- `tags` — 中文标签（3–5 个），如 `入口点`、`工具函数`、`数据模型`、`接口处理`；仅当无自然中文说法时保留英文技术词（如 `middleware`）
+- `businessSignals[].text` — 中文产品业务描述，遵循 Business Signals 规则（WHO DO WHAT，无代码/技术描述）
+- `languageNotes` — 有则写中文
+
 Use natural, native-level phrasing. Keep code identifiers, file paths, class/function names, framework/library names, API names, and standard technical keywords in their original language when that preserves accuracy or searchability.
 
 ---
@@ -174,8 +176,8 @@ Write a 1-2 sentence summary that describes the file's purpose and role in the p
 - **Data files:** Describe the schema/data structure (e.g., "Core user and orders tables with foreign key relationships and audit timestamps.")
 - **Pipeline files:** Describe the CI/CD workflow (e.g., "GitHub Actions workflow running tests, building Docker image, and deploying to production on merge to main.")
 
-Bad: "The utils file contains utility functions."
-Good: "Provides date formatting and string sanitization helpers used across the API layer."
+Bad (中文指令下): "The utils file contains utility functions."
+Good (中文指令下): "提供日期格式化与字符串清理工具，供 API 层各模块复用。"
 
 **Complexity** (informed by script metrics):
 - `simple`: under 50 non-empty lines, minimal structure
@@ -185,7 +187,7 @@ Good: "Provides date formatting and string sanitization helpers used across the 
 Use the script's metrics to inform this -- but apply judgment.
 
 **Tags** (your expert judgment required):
-Assign 3-5 lowercase, hyphenated keyword tags. Use the script's structural data to inform your choices. Choose from patterns like:
+Assign 3-5 keyword tags. Under a Chinese language directive, use **Chinese tags** (e.g. `入口点`, `工具函数`, `数据模型`); otherwise use lowercase hyphenated English tags. Use the script's structural data to inform your choices. Choose from patterns like:
 
 For code files:
 `entry-point`, `utility`, `api-handler`, `data-model`, `test`, `config`, `middleware`, `component`, `hook`, `service`, `type-definition`, `barrel`, `factory`, `singleton`, `event-handler`, `validation`, `serialization`
@@ -248,24 +250,38 @@ For each function/class node, provide a `summary` and `tags` using the same guid
 
 #### Business Signals
 
-When a file, class, function, method, endpoint, service, receiver, route, task, or resource clearly carries product-facing or business behavior, **add a `businessSignals` array to that node**.
+Field name is **`businessSignals`** (plural array on the node). Do **not** emit `businessSignal` (singular) — that is invalid and will be stripped by schema sanitization.
+
+When a file, class, function, method, endpoint, service, receiver, route, task, or resource carries product-facing or business behavior, **you MUST add a non-empty `businessSignals` array** to that node. Treat omission as an error unless the node is pure infrastructure/boilerplate with no user-visible behavior (see omit list below).
 
 Signal schema:
 
 ```json
-{"type": "entry|behavior|rule|display|data|integration", "text": "product phrase"}
+{"type": "entry|behavior|rule|display|data|integration", "text": "产品短语"}
 ```
+
+**MUST emit `businessSignals` when any of these apply:**
+- Android: `Activity`, `Fragment`, `ViewModel`, `Presenter`, `UseCase`/`Interactor`, `Receiver`, navigation/route handlers, analytics/event handlers tied to user actions
+- User-facing UI: screens, dialogs, lists, forms, menus
+- API/endpoint nodes: what user or system capability the endpoint exposes
+- Domain/data flows: fetch/submit/display business entities (orders, playback, login, etc.)
+- Integration: cast, pay, share, push, third-party SDK user flows
+- File-level: the file is an app entry, feature module root, or orchestrates a user journey
+
+**Only omit `businessSignals` when ALL are true:**
+- Pure util/helper with no product vocabulary (generic string/date/format helpers)
+- Generated/boilerplate: ViewBinding init, DI wiring, base class overrides with no business branch, logging-only, observer registration-only
+- Config/docs/infra with no end-user behavior (e.g. `tsconfig.json`, raw Terraform with no app tie-in)
 
 Rules:
 
-- `businessSignals` is optional. Omit it when the node has no clear product meaning.
 - Do not include anchors, file paths, line ranges, conditions, or long explanations inside a signal. The node itself provides location.
 - File node signals describe what business the file carries as a whole.
 - Class/function/method node signals describe the concrete business behavior at that symbol.
-- Each function/method node may have at most 1 signal.
-- Each class node may have at most 3 signals.
-- Each file node may have at most 8 signals.
-- `text`: 必须是**产品语言表达的业务表现，不允许出现代码，不允许出现技术描述**. **Focused on ”WHO DO WHAT“, not "HOW"**
+- Each function/method node: **at most 1** signal; if the symbol has product meaning, emit exactly 1.
+- Each class node: **at most 3** signals; emit 1–3 when the class has product meaning.
+- Each file node: **at most 8** signals; emit at least 1 when the file has product meaning.
+- `text`: 必须是**产品语言表达的业务表现，不允许出现代码，不允许出现技术描述**. **Focused on ”WHO DO WHAT“, not "HOW"**. 与 `summary` 使用相同语言（中文指令下必须中文）.
 - Do not emit signals for ViewBinding initialization, inheritance, dependency injection, logging, generic utilities, observer registration, or base framework boilerplate.
 
 Examples:
@@ -322,6 +338,8 @@ For every code file in this batch:
 
 The `batchImportData` values contain only resolved project-internal paths — external packages have already been filtered out, so every path is safe to emit. Do NOT attempt to re-resolve imports from source. Do NOT skip imports because the target lives in another batch (cross-batch references are explicitly allowed for `imports` edges, since the project-scanner already verified the path exists).
 
+In **scoped shard** builds, `batchImportData` may include targets **outside the current scope** (from the scanner's full-repo `importMap`). Still emit an `imports` edge for every listed path; merge will mark targets without an in-shard `file:` node as `external: true` when writing shard output.
+
 **Self-check before writing the batch JSON:** sum `batchImportData[file].length` across every code file in your batch. The number of `imports` edges in your output MUST equal that sum. If it doesn't, you dropped some during enumeration — go back and add them. (A deterministic post-processing pass in `merge-batch-graphs.py` will recover anything you still miss, but it is your job to get this right at emission time so the recovery report stays empty.)
 
 **Non-code edge creation guidance:**
@@ -371,12 +389,12 @@ Produce a single, valid JSON block. Before writing, verify that all arrays and o
       "type": "file",
       "name": "index.ts",
       "filePath": "src/index.ts",
-      "summary": "Main entry point that bootstraps the application and re-exports all public modules.",
-      "tags": ["entry-point", "barrel", "exports"],
+      "summary": "应用主入口，负责启动并对外重新导出公共模块。",
+      "tags": ["入口点", "桶导出", "模块导出"],
       "complexity": "simple",
-      "languageNotes": "TypeScript barrel file using re-exports.",
+      "languageNotes": "TypeScript 桶文件，通过 re-export 聚合公共 API。",
       "businessSignals": [
-        {"type": "entry", "text": "public module entry point"}
+        {"type": "entry", "text": "首页主要入口，负责首页数据请求和展示"}
       ]
     },
     {
@@ -384,8 +402,8 @@ Produce a single, valid JSON block. Before writing, verify that all arrays and o
       "type": "config",
       "name": "tsconfig.json",
       "filePath": "tsconfig.json",
-      "summary": "TypeScript compiler configuration enabling strict mode with path aliases for monorepo packages.",
-      "tags": ["configuration", "typescript", "build-system"],
+      "summary": "TypeScript 编译配置，启用严格模式并为 monorepo 包配置路径别名。",
+      "tags": ["配置", "typescript", "构建"],
       "complexity": "simple"
     },
     {
@@ -393,8 +411,8 @@ Produce a single, valid JSON block. Before writing, verify that all arrays and o
       "type": "document",
       "name": "README.md",
       "filePath": "README.md",
-      "summary": "Project overview documentation with getting-started guide, API reference, and contribution guidelines.",
-      "tags": ["documentation", "entry-point", "overview"],
+      "summary": "项目概览文档，包含快速上手、API 说明与贡献指南。",
+      "tags": ["文档", "入口点", "概览"],
       "complexity": "moderate"
     },
     {
@@ -402,10 +420,13 @@ Produce a single, valid JSON block. Before writing, verify that all arrays and o
       "type": "service",
       "name": "Dockerfile",
       "filePath": "Dockerfile",
-      "summary": "Multi-stage Docker build producing a minimal Node.js production image with health checks.",
-      "tags": ["containerization", "infrastructure", "deployment"],
+      "summary": "多阶段 Docker 构建，产出带健康检查的精简 Node.js 生产镜像。",
+      "tags": ["容器化", "基础设施", "部署"],
       "complexity": "moderate",
-      "languageNotes": "Multi-stage builds reduce image size by separating build dependencies from runtime."
+      "languageNotes": "多阶段构建将构建依赖与运行时分离以缩小镜像体积。",
+      "businessSignals": [
+        {"type": "integration", "text": "将应用打包为可部署的生产容器镜像"}
+      ]
     },
     {
       "id": "function:src/utils.ts:formatDate",
@@ -413,8 +434,8 @@ Produce a single, valid JSON block. Before writing, verify that all arrays and o
       "name": "formatDate",
       "filePath": "src/utils.ts",
       "lineRange": [10, 25],
-      "summary": "Formats a Date object to ISO string with timezone offset.",
-      "tags": ["utility", "date", "formatting"],
+      "summary": "将 Date 格式化为带时区偏移的 ISO 字符串。",
+      "tags": ["工具函数", "日期", "格式化"],
       "complexity": "simple"
     }
   ],
@@ -463,7 +484,7 @@ Produce a single, valid JSON block. Before writing, verify that all arrays and o
 - `type` (string) -- one of: `file`, `function`, `class`, `config`, `document`, `service`, `table`, `endpoint`, `pipeline`, `schema`, `resource` (11 types; `module`, `concept`, `domain`, `flow`, `step` are reserved for other agents)
 - `name` (string) -- display name (filename for file nodes, function/class name for others)
 - `summary` (string) -- 1-2 sentence description, NEVER empty
-- `tags` (string[]) -- 3-5 lowercase hyphenated tags, NEVER empty
+- `tags` (string[]) -- 3-5 tags, NEVER empty (Chinese under Chinese language directive; otherwise lowercase hyphenated English)
 - `complexity` (string) -- one of: `simple`, `moderate`, `complex`
 
 **Conditionally required fields:**
@@ -472,7 +493,7 @@ Produce a single, valid JSON block. Before writing, verify that all arrays and o
 
 **Optional fields:**
 - `languageNotes` (string) -- only when there is a genuinely notable pattern
-- `businessSignals` (array) -- optional product-facing signals for a GraphNode, each shaped as `{ "type": "entry|behavior|rule|display|data|integration", "text": "short product phrase" }`
+- `businessSignals` (array) -- product-facing signals when the node has business meaning (see Business Signals); each entry `{ "type": "entry|behavior|rule|display|data|integration", "text": "short product phrase" }`. Field name must be `businessSignals`, not `businessSignal`.
 
 **Required fields for every edge:**
 - `source` (string) -- must reference an existing node `id` in your output or a known node from the project
@@ -501,6 +522,8 @@ Use these hints for common edge patterns:
 
 ## Critical Constraints
 
+- **Pre-write businessSignals check:** For every `file`, `class`, `function`, `endpoint`, and `service` node you create, ask: does this symbol expose user-visible or product behavior? If yes, `businessSignals` MUST be present and non-empty. Scan your JSON before writing — missing signals on Activity/Fragment/ViewModel/Presenter/UseCase/API handlers is a common failure mode.
+- **Pre-write language check:** When a Chinese language directive is active, every `summary`, `tags[]`, and `businessSignals[].text` must be Chinese (identifiers/paths unchanged).
 - NEVER invent file paths. Every `filePath` and every file reference in node IDs must correspond to a real file from the script's output, `batchFiles`, or `batchImportData`.
 - NEVER create edges to nodes that do not exist. Only create import edges for paths listed in `batchImportData` — these are already verified project-internal paths. For non-code edges (configures, documents, deploys, etc.), only target nodes that exist in your batch or that you know exist from other batches.
 - ALWAYS create a node for EVERY file in your batch, even if the file is trivial. Use the appropriate node type based on fileCategory.
@@ -512,10 +535,37 @@ Use these hints for common edge patterns:
 
 ## Writing Results
 
-After producing the JSON:
+After producing the nodes/edges JSON, write it using **one** of the two modes below. The dispatch prompt tells you which mode applies.
+
+### Full build or non-sharded incremental (default)
 
 1. Write the JSON to: `<project-root>/.understand-anything/intermediate/batch-<batchIndex>.json`
 2. The project root and batch index will be provided in your prompt.
 3. Respond with ONLY a brief text summary: number of nodes created (by type), number of edges created, and any files that were skipped.
 
 Do NOT include the full JSON in your text response.
+
+### Sharded `--update-diff` (codebase-sharded)
+
+Use this mode when the dispatch prompt says you are analyzing a **single code shard** for a sharded incremental update. Do **not** write to `intermediate/batch-<batchIndex>.json` in this mode.
+
+1. Analyze **only** the files listed in the prompt's `structuralFiles` for that shard. Do not re-analyze unchanged files in the shard.
+2. Wrap your nodes/edges in a run-scoped envelope and write to the **exact** path from the prompt (typically `.understand-anything/intermediate/sharded/<shardId>/batch-001.json`). Copy `runId`, `headCommitHash`, and `shardId` verbatim from the prompt — do not invent or omit them.
+3. Set `status` to `"success"` when analysis completes. If you cannot finish, still write the file with `status: "failed"` and a short `warning` string instead of omitting the file.
+
+Required envelope (in addition to `nodes` and `edges`):
+
+```json
+{
+  "runId": "<from sharded-update-run.json>",
+  "headCommitHash": "<from sharded-update-run.json>",
+  "shardId": "<shard id>",
+  "status": "success",
+  "nodes": [],
+  "edges": []
+}
+```
+
+4. Respond with ONLY a brief text summary: shard id, node/edge counts, and any skipped files.
+
+`assemble-shard` rejects batches whose `runId`, `headCommitHash`, or `shardId` do not match the active run, and rejects `status` values other than `"success"`.
