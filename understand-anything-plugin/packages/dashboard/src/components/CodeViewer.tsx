@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { Highlight, themes } from "prism-react-renderer";
 import { useDashboardStore } from "../store";
 import { useI18n } from "../contexts/I18nContext";
@@ -119,11 +119,6 @@ export default function CodeViewer({
     return () => controller.abort();
   }, [accessToken, node?.filePath]);
 
-  const highlightedRange = useMemo(() => {
-    if (!node?.lineRange) return null;
-    return { start: node.lineRange[0], end: node.lineRange[1] };
-  }, [node?.lineRange]);
-
   if (!node) {
     return (
       <div className="h-full w-full flex items-center justify-center bg-surface">
@@ -134,9 +129,6 @@ export default function CodeViewer({
 
   const source = state.source;
   const language = source?.language ?? fallbackLanguage(node.filePath);
-  const lineInfo = highlightedRange
-    ? `${t.codeViewer.lines} ${highlightedRange.start}-${highlightedRange.end}`
-    : t.codeViewer.fullFile;
   const isModal = presentation === "modal";
   const handleClose = onClose ?? closeCodeViewer;
 
@@ -155,7 +147,7 @@ export default function CodeViewer({
             >
               {language}
             </span>
-            <span className="text-[10px] text-text-muted">{lineInfo}</span>
+            <span className="text-[10px] text-text-muted">{t.codeViewer.fullFile}</span>
           </div>
           <div className="text-sm font-heading text-text-primary truncate" title={node.name}>
             {node.name}
@@ -224,18 +216,12 @@ export default function CodeViewer({
                 >
                   {tokens.map((line, index) => {
                     const lineNumber = index + 1;
-                    const isHighlighted =
-                      highlightedRange !== null &&
-                      lineNumber >= highlightedRange.start &&
-                      lineNumber <= highlightedRange.end;
                     const lineProps = getLineProps({ line });
                     return (
                       <div
                         key={lineNumber}
                         {...lineProps}
-                        className={`${lineProps.className} flex ${
-                          isHighlighted ? "bg-accent/15" : "hover:bg-elevated/40"
-                        }`}
+                        className={`${lineProps.className} flex hover:bg-elevated/40`}
                       >
                         <span className="w-12 shrink-0 select-none border-r border-border-subtle pr-3 text-right text-text-muted bg-surface/60">
                           {lineNumber}

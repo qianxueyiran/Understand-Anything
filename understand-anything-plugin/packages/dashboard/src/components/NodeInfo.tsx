@@ -294,19 +294,6 @@ export default function NodeInfo() {
     (e) => e.source === node.id || e.target === node.id,
   );
 
-  // Separate child nodes (contained IN this file) from other connections
-  const childEdges = connections.filter(
-    (e) => e.type === "contains" && e.source === node.id,
-  );
-  const otherConnections = connections.filter(
-    (e) => !(e.type === "contains" && e.source === node.id),
-  );
-
-  // Resolve child nodes
-  const childNodes = childEdges
-    .map((e) => activeGraph?.nodes.find((n) => n.id === e.target))
-    .filter((n): n is GraphNode => n !== undefined);
-
   const knownType = node.type as NodeType;
   const typeBadge = typeBadgeColors[knownType] ?? typeBadgeColors.file;
   const complexityBadge =
@@ -463,52 +450,13 @@ export default function NodeInfo() {
         <DomainNodeDetails node={node} graph={activeGraph} />
       )}
 
-      {/* Child classes/functions within this file */}
-      {childNodes.length > 0 && (
-        <div className="mb-4">
-          <h3 className="text-[11px] font-semibold text-gold uppercase tracking-wider mb-2">
-            {t.nodeInfo.definedInThisFile} ({childNodes.length})
-          </h3>
-          <div className="space-y-1">
-            {childNodes.map((child) => {
-              if (!child) return null;
-              const childTypeBadge = typeBadgeColors[child.type as NodeType] ?? typeBadgeColors.file;
-              const childComplexity = complexityBadgeColors[child.complexity] ?? complexityBadgeColors.simple;
-              return (
-                <div
-                  key={child.id}
-                  className="text-xs bg-elevated rounded-lg px-3 py-2 border border-border-subtle cursor-pointer hover:border-gold/40 hover:bg-gold/5 transition-colors"
-                  onClick={() => navigateToNode(child.id)}
-                >
-                  <div className="flex items-center gap-2">
-                    <span className={`text-[9px] font-semibold uppercase tracking-wider px-1.5 py-0.5 rounded ${childTypeBadge}`}>
-                      {child.type}
-                    </span>
-                    <span className="text-text-primary truncate">{child.name}</span>
-                    <span className={`text-[9px] ml-auto ${childComplexity} px-1 py-0.5 rounded`}>
-                      {child.complexity}
-                    </span>
-                  </div>
-                  {child.summary && (
-                    <p className="text-[11px] text-text-muted mt-1 line-clamp-1 pl-1">
-                      {child.summary}
-                    </p>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      )}
-
-      {/* Other connections (excluding "contains" children) */}
-      {otherConnections.length > 0 && (
+      {connections.length > 0 && (
         <div>
           <h3 className="text-[11px] font-semibold text-gold uppercase tracking-wider mb-2">
-            {t.common.connections} ({otherConnections.length})
+            {t.common.connections} ({connections.length})
           </h3>
           <div className="space-y-1.5">
-            {otherConnections.map((edge, i) => {
+            {connections.map((edge, i) => {
               const isSource = edge.source === node.id;
               const otherId = isSource ? edge.target : edge.source;
               const otherNode = activeGraph?.nodes.find((n) => n.id === otherId);

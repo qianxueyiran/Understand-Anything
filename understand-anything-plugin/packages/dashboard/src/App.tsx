@@ -308,10 +308,6 @@ function DashboardContent({
   const togglePathFinder = useDashboardStore((s) => s.togglePathFinder);
   const nodeTypeFilters = useDashboardStore((s) => s.nodeTypeFilters);
   const toggleNodeTypeFilter = useDashboardStore((s) => s.toggleNodeTypeFilter);
-  const detailLevel = useDashboardStore((s) => s.detailLevel);
-  const setDetailLevel = useDashboardStore((s) => s.setDetailLevel);
-  const showFunctionsInClassView = useDashboardStore((s) => s.showFunctionsInClassView);
-  const toggleShowFunctionsInClassView = useDashboardStore((s) => s.toggleShowFunctionsInClassView);
   const [showKeyboardHelp, setShowKeyboardHelp] = useState(false);
   const [sidebarTab, setSidebarTab] = useState<SidebarTab>("info");
   const viewMode = useDashboardStore((s) => s.viewMode);
@@ -554,52 +550,6 @@ function DashboardContent({
         <div className="flex-1 min-w-0 overflow-x-auto scrollbar-hide">
           <div className="flex items-center gap-4 w-max">
             <DiffToggle />
-            {/* Detail level: file view (architecture) / class view (code structure) */}
-            {!isKnowledgeGraph && viewMode !== "domain" && (
-              <>
-                <div className="w-px h-5 bg-border-subtle" />
-                <div className="flex items-center bg-elevated rounded-lg p-0.5">
-                  <button
-                    type="button"
-                    onClick={() => setDetailLevel("file")}
-                    title={t.detailLevel.filesTitle}
-                    className={`px-3 py-1 text-xs font-medium rounded-md transition-colors ${
-                      detailLevel === "file"
-                        ? "bg-accent/20 text-accent"
-                        : "text-text-muted hover:text-text-secondary"
-                    }`}
-                  >
-                    {t.detailLevel.files}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setDetailLevel("class")}
-                    title={t.detailLevel.classesTitle}
-                    className={`px-3 py-1 text-xs font-medium rounded-md transition-colors ${
-                      detailLevel === "class"
-                        ? "bg-accent/20 text-accent"
-                        : "text-text-muted hover:text-text-secondary"
-                    }`}
-                  >
-                    {t.detailLevel.classes}
-                  </button>
-                </div>
-                {detailLevel === "class" && (
-                  <button
-                    type="button"
-                    onClick={toggleShowFunctionsInClassView}
-                    title={t.detailLevel.fnTitle}
-                    className={`text-[10px] font-semibold uppercase tracking-wider px-2 py-1 rounded border transition-colors ${
-                      showFunctionsInClassView
-                        ? "border-amber-500/50 bg-amber-500/10 text-amber-400"
-                        : "border-border-medium bg-elevated text-text-muted hover:text-text-secondary"
-                    }`}
-                  >
-                    {t.detailLevel.fn}
-                  </button>
-                )}
-              </>
-            )}
             <div className="flex items-center gap-1">
               {(isKnowledgeGraph ? [
                 { key: "knowledge" as const, label: t.nodeTypeLabels.all, color: "var(--color-node-article)" },
