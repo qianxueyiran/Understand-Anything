@@ -39,7 +39,7 @@ The knowledge graph JSON has this structure:
 
 4. **Find nodes for changed files** — for each changed file path, use Grep to search the knowledge graph for:
    - Nodes with matching `"filePath"` values (e.g., `grep "changed/file/path"`)
-   - This finds file nodes AND function/class nodes defined in those files
+   - This finds file nodes for the changed paths (function/class symbol nodes are no longer emitted)
    - Note the `id` values of all matched nodes
 
 5. **Find connected edges (1-hop)** — for each matched node ID, Grep for that ID in the edges to find:
