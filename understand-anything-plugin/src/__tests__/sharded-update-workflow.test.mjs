@@ -1253,8 +1253,6 @@ function writeDownstreamCommitFixture(root, options = {}) {
     shard: { id: "home", scopes: ["home"] },
     nodes: [{ id: "file:home/Home.ts", type: "file", filePath: "home/Home.ts" }],
     edges: [],
-    layers: [{ id: "files", nodeIds: ["file:home/Home.ts"] }],
-    tour: [{ title: "Home", nodeIds: ["file:home/Home.ts"] }],
   });
   writeJson(join(root, ".understand-anything", "knowledge-graph.json"), {
     version: "1.0.0",

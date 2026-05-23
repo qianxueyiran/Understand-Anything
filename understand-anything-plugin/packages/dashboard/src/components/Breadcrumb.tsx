@@ -8,7 +8,7 @@ export default function Breadcrumb() {
   const navigateToOverview = useDashboardStore((s) => s.navigateToOverview);
   const { t } = useI18n();
 
-  const activeLayer = graph?.layers.find((l) => l.id === activeLayerId);
+  const activeLayer = graph?.layers?.find((l) => l.id === activeLayerId);
 
   return (
     <div className="absolute top-4 left-4 z-10 flex items-center gap-2">

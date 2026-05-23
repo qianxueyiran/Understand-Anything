@@ -322,14 +322,14 @@ describe("sanitizeGraph", () => {
     expect(edge.direction).toBe("forward");
   });
 
-  it("converts null tour/layers to empty arrays", () => {
+  it("omits null or empty tour/layers keys", () => {
     const graph = structuredClone(validGraph);
     (graph as any).tour = null;
     (graph as any).layers = null;
 
     const result = sanitizeGraph(graph as any);
-    expect((result as any).tour).toEqual([]);
-    expect((result as any).layers).toEqual([]);
+    expect((result as any).tour).toBeUndefined();
+    expect((result as any).layers).toBeUndefined();
   });
 
   it("converts null optional tour step fields to undefined", () => {
