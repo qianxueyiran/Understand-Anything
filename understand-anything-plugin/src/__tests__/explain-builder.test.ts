@@ -18,17 +18,13 @@ const sampleGraph: KnowledgeGraph = {
   },
   nodes: [
     { id: "file:src/auth.ts", type: "file", name: "auth.ts", filePath: "src/auth.ts", summary: "Auth module", tags: ["auth"], complexity: "complex" },
-    { id: "function:src/auth.ts:login", type: "function", name: "login", filePath: "src/auth.ts", lineRange: [10, 30], summary: "Login handler", tags: ["auth", "login"], complexity: "moderate" },
-    { id: "function:src/auth.ts:verify", type: "function", name: "verify", filePath: "src/auth.ts", lineRange: [32, 50], summary: "Token verification", tags: ["auth", "jwt"], complexity: "moderate" },
     { id: "file:src/db.ts", type: "file", name: "db.ts", filePath: "src/db.ts", summary: "Database", tags: ["db"], complexity: "simple" },
   ],
   edges: [
-    { source: "file:src/auth.ts", target: "function:src/auth.ts:login", type: "contains", direction: "forward", weight: 1.0 },
-    { source: "file:src/auth.ts", target: "function:src/auth.ts:verify", type: "contains", direction: "forward", weight: 1.0 },
-    { source: "function:src/auth.ts:login", target: "file:src/db.ts", type: "reads_from", direction: "forward", weight: 0.8 },
+    { source: "file:src/auth.ts", target: "file:src/db.ts", type: "reads_from", direction: "forward", weight: 0.8 },
   ],
   layers: [
-    { id: "layer:auth", name: "Auth Layer", description: "Authentication", nodeIds: ["file:src/auth.ts", "function:src/auth.ts:login", "function:src/auth.ts:verify"] },
+    { id: "layer:auth", name: "Auth Layer", description: "Authentication", nodeIds: ["file:src/auth.ts"] },
   ],
   tour: [],
 };
@@ -40,10 +36,9 @@ describe("explain-builder", () => {
       expect(ctx.targetNode?.id).toBe("file:src/auth.ts");
     });
 
-    it("includes child nodes (functions/classes in the file)", () => {
+    it("returns empty childNodes (file-only graphs)", () => {
       const ctx = buildExplainContext(sampleGraph, "src/auth.ts");
-      expect(ctx.childNodes.map((n) => n.name)).toContain("login");
-      expect(ctx.childNodes.map((n) => n.name)).toContain("verify");
+      expect(ctx.childNodes).toEqual([]);
     });
 
     it("includes connected nodes", () => {
@@ -62,22 +57,34 @@ describe("explain-builder", () => {
       expect(ctx.targetNode).toBeNull();
     });
 
-    it("finds function nodes by partial path match", () => {
-      const ctx = buildExplainContext(sampleGraph, "src/auth.ts:login");
-      expect(ctx.targetNode?.name).toBe("login");
+    it("resolves file path only (no path:function notation)", () => {
+      const graph: KnowledgeGraph = {
+        version: "1.0.0",
+        project: { name: "demo", description: "", languages: [], frameworks: [] },
+        nodes: [
+          { id: "file:src/auth.ts", type: "file", name: "auth.ts", filePath: "src/auth.ts", summary: "Auth", tags: ["auth"], complexity: "moderate" },
+        ],
+        edges: [],
+        layers: [],
+        tour: [],
+      };
+
+      const byFile = buildExplainContext(graph, "src/auth.ts");
+      expect(byFile.targetNode?.id).toBe("file:src/auth.ts");
+      expect(byFile.childNodes).toEqual([]);
+
+      const bySymbol = buildExplainContext(graph, "src/auth.ts:login");
+      expect(bySymbol.targetNode?.id).toBe("file:src/auth.ts");
+      expect(bySymbol.childNodes).toEqual([]);
     });
 
     it("builds context from sharded graphs without requiring a complete root graph", () => {
       const homeShard: KnowledgeGraph = {
         ...sampleGraph,
         project: { ...sampleGraph.project, name: "home-shard" },
-        nodes: [
-          sampleGraph.nodes[0],
-          sampleGraph.nodes[1],
-        ],
+        nodes: [sampleGraph.nodes[0]],
         edges: [
-          { source: "file:src/auth.ts", target: "function:src/auth.ts:login", type: "contains", direction: "forward", weight: 1.0 },
-          { source: "function:src/auth.ts:login", target: "file:src/db.ts", type: "reads_from", direction: "forward", weight: 0.8 },
+          { source: "file:src/auth.ts", target: "file:src/db.ts", type: "reads_from", direction: "forward", weight: 0.8 },
         ],
         layers: [
           { id: "layer:auth", name: "Auth Layer", description: "Authentication", nodeIds: ["file:src/auth.ts"] },
@@ -86,7 +93,7 @@ describe("explain-builder", () => {
       const dbShard: KnowledgeGraph = {
         ...sampleGraph,
         project: { ...sampleGraph.project, name: "db-shard" },
-        nodes: [sampleGraph.nodes[3]],
+        nodes: [sampleGraph.nodes[1]],
         edges: [],
         layers: [],
       };
@@ -105,7 +112,6 @@ describe("explain-builder", () => {
       const ctx = buildExplainContext(sampleGraph, "src/auth.ts");
       const prompt = formatExplainPrompt(ctx);
       expect(prompt).toContain("auth.ts");
-      expect(prompt).toContain("login");
       expect(prompt).toContain("Auth Layer");
     });
 

@@ -41,13 +41,6 @@ export function buildDiffContext(
     }
   }
 
-  // Also include "contains" children of changed file nodes
-  for (const edge of edges) {
-    if (edge.type === "contains" && changedNodeIds.has(edge.source)) {
-      changedNodeIds.add(edge.target);
-    }
-  }
-
   const changedNodes = nodes.filter((n) => changedNodeIds.has(n.id));
 
   // Find affected nodes: 1-hop neighbors of changed nodes (excluding already changed)
