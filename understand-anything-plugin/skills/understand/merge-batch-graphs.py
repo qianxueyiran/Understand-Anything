@@ -80,7 +80,10 @@ COMPLEXITY_MAP: dict[str, str] = {
 VALID_COMPLEXITY = {"simple", "moderate", "complex"}
 
 BUSINESS_SIGNAL_TYPES = {"entry", "behavior", "rule", "display", "data", "integration"}
-BUSINESS_SIGNAL_CAPS = {"file": 8, "class": 3, "function": 1}
+BUSINESS_SIGNAL_CAPS = {"file": 8}
+
+SYMBOL_NODE_TYPES = frozenset({"function", "class"})
+SYMBOL_EDGE_TYPES = frozenset({"contains", "exports", "calls", "inherits", "implements"})
 
 
 # ── tested_by linker configuration ────────────────────────────────────────
@@ -762,6 +765,31 @@ def is_shard_merge_output(path: Path) -> bool:
 
 # ── Main merge + normalize ────────────────────────────────────────────────
 
+def strip_symbol_graph(
+    nodes: list[dict[str, Any]],
+    edges: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], dict[str, int]]:
+    """Remove function/class nodes and edges that depend on symbol endpoints."""
+    symbol_ids = {
+        node["id"]
+        for node in nodes
+        if node.get("type") in SYMBOL_NODE_TYPES and isinstance(node.get("id"), str)
+    }
+    kept_nodes = [node for node in nodes if node.get("type") not in SYMBOL_NODE_TYPES]
+    kept_edges = [
+        edge
+        for edge in edges
+        if edge.get("type") not in SYMBOL_EDGE_TYPES
+        and edge.get("source") not in symbol_ids
+        and edge.get("target") not in symbol_ids
+    ]
+    stats = {
+        "nodes_removed": len(nodes) - len(kept_nodes),
+        "edges_removed": len(edges) - len(kept_edges),
+    }
+    return kept_nodes, kept_edges, stats
+
+
 def merge_and_normalize(
     batches: list[dict[str, Any]],
     preserve_external: bool = False,
@@ -910,6 +938,21 @@ def merge_and_normalize(
         if edge.get("external") is True
     )
 
+    stripped_nodes, stripped_edges, symbol_stats = strip_symbol_graph(
+        list(nodes_by_id.values()),
+        list(edges_by_key.values()),
+    )
+    nodes_by_id = {node["id"]: node for node in stripped_nodes}
+    edges_by_key = {
+        (e["source"], e["target"], e.get("type", ""), e.get("direction", "forward")): e
+        for e in stripped_edges
+    }
+    symbol_strip_lines: list[str] = []
+    if symbol_stats["nodes_removed"] or symbol_stats["edges_removed"]:
+        symbol_strip_lines.append("Symbol slim:")
+        symbol_strip_lines.append(f"  {symbol_stats['nodes_removed']:>4} × function/class nodes removed")
+        symbol_strip_lines.append(f"  {symbol_stats['edges_removed']:>4} × symbol edges removed")
+
     # ── Build report ─────────────────────────────────────────────────
     report: list[str] = []
     report.append(f"Input: {total_input_nodes} nodes, {total_input_edges} edges")
@@ -958,6 +1001,10 @@ def merge_and_normalize(
         report.append("Business signals:")
         report.append(f"  {business_signal_nodes:>4} × nodes with businessSignals preserved")
         report.append(f"  {business_signal_dropped:>4} × malformed/duplicate/over-cap businessSignals dropped")
+
+    if symbol_strip_lines:
+        report.append("")
+        report.extend(symbol_strip_lines)
 
     # Shard mode section — external endpoints are expected when only a scoped
     # subset of nodes is assembled.

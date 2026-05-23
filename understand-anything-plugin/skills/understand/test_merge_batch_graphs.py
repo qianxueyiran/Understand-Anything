@@ -1151,5 +1151,74 @@ class BusinessSignalMergeTests(unittest.TestCase):
         self.assertEqual(signals, [{"type": "display", "text": shared_prefix}])
 
 
+class StripSymbolGraphTests(unittest.TestCase):
+    """File-only graph: remove function/class nodes and symbol edges."""
+
+    def test_strips_function_class_nodes_and_symbol_edges(self) -> None:
+        nodes = [
+            _file_node("src/a.ts"),
+            _file_node("src/b.ts"),
+            {
+                "id": "function:src/a.ts:run",
+                "type": "function",
+                "name": "run",
+                "filePath": "src/a.ts",
+                "summary": "Runs",
+                "tags": ["core"],
+                "complexity": "simple",
+            },
+            {
+                "id": "class:src/b.ts:Worker",
+                "type": "class",
+                "name": "Worker",
+                "filePath": "src/b.ts",
+                "summary": "Worker",
+                "tags": ["core"],
+                "complexity": "moderate",
+            },
+        ]
+        edges = [
+            {"source": "file:src/a.ts", "target": "file:src/b.ts", "type": "imports", "direction": "forward", "weight": 0.7},
+            {"source": "file:src/a.ts", "target": "function:src/a.ts:run", "type": "contains", "direction": "forward", "weight": 1.0},
+            {"source": "file:src/b.ts", "target": "class:src/b.ts:Worker", "type": "exports", "direction": "forward", "weight": 0.8},
+            {"source": "function:src/a.ts:run", "target": "function:src/b.ts:Worker", "type": "calls", "direction": "forward", "weight": 0.8},
+        ]
+
+        stripped_nodes, stripped_edges, stats = mbg.strip_symbol_graph(nodes, edges)
+
+        self.assertEqual({n["type"] for n in stripped_nodes}, {"file"})
+        self.assertEqual(len(stripped_nodes), 2)
+        self.assertEqual(len(stripped_edges), 1)
+        self.assertEqual(stripped_edges[0]["type"], "imports")
+        self.assertEqual(stats["nodes_removed"], 2)
+        self.assertEqual(stats["edges_removed"], 3)
+
+    def test_merge_and_normalize_applies_symbol_strip(self) -> None:
+        batches = [{
+            "nodes": [
+                _file_node("src/a.ts"),
+                {
+                    "id": "function:src/a.ts:run",
+                    "type": "function",
+                    "name": "run",
+                    "filePath": "src/a.ts",
+                    "summary": "Runs",
+                    "tags": ["core"],
+                    "complexity": "simple",
+                },
+            ],
+            "edges": [
+                {"source": "file:src/a.ts", "target": "function:src/a.ts:run", "type": "contains", "direction": "forward", "weight": 1.0},
+            ],
+        }]
+
+        assembled, report = mbg.merge_and_normalize(batches)
+        types = {n["type"] for n in assembled["nodes"]}
+        self.assertEqual(types, {"file"})
+        self.assertEqual(assembled["edges"], [])
+        joined = "\n".join(report)
+        self.assertIn("Symbol slim", joined)
+
+
 if __name__ == "__main__":
     unittest.main()
