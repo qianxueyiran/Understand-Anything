@@ -12,6 +12,9 @@ import type { ReactFlowInstance } from "@xyflow/react";
 
 export type Persona = "non-technical" | "junior" | "experienced";
 export type NavigationLevel = "overview" | "layer-detail";
+
+/** Sentinel layer id when the graph has no architecture layers — show all file-level nodes. */
+export const FLAT_LAYER_ID = "__flat__";
 export type NodeType = "file" | "function" | "class" | "module" | "concept" | "config" | "document" | "service" | "table" | "endpoint" | "pipeline" | "schema" | "resource" | "domain" | "flow" | "step" | "article" | "entity" | "topic" | "claim" | "source";
 export type Complexity = "simple" | "moderate" | "complex";
 export type EdgeCategory = "structural" | "behavioral" | "data-flow" | "dependencies" | "semantic" | "infrastructure" | "domain" | "knowledge";
@@ -343,6 +346,7 @@ export const useDashboardStore = create<DashboardStore>()((set, get) => ({
     // Preserve domain view if a domain graph is already loaded
     const keepDomainView = viewMode === "domain" && domainGraph !== null;
     const { nodesById, nodeIdToLayerId, nodeIdToLayerIds } = buildGraphIndexes(graph);
+    const hasLayers = (graph.layers?.length ?? 0) > 0;
     set({
       graph,
       nodesById,
@@ -350,8 +354,8 @@ export const useDashboardStore = create<DashboardStore>()((set, get) => ({
       nodeIdToLayerIds,
       searchEngine,
       searchResults,
-      navigationLevel: "overview",
-      activeLayerId: null,
+      navigationLevel: hasLayers ? "overview" : "layer-detail",
+      activeLayerId: hasLayers ? null : FLAT_LAYER_ID,
       selectedNodeId: null,
       focusNodeId: null,
       nodeHistory: [],
@@ -464,10 +468,12 @@ export const useDashboardStore = create<DashboardStore>()((set, get) => ({
       pendingFocusContainer: null,
     }),
 
-  navigateToOverview: () =>
+  navigateToOverview: () => {
+    const graph = get().graph;
+    const hasLayers = (graph?.layers?.length ?? 0) > 0;
     set({
-      navigationLevel: "overview",
-      activeLayerId: null,
+      navigationLevel: hasLayers ? "overview" : "layer-detail",
+      activeLayerId: hasLayers ? null : FLAT_LAYER_ID,
       selectedNodeId: null,
       focusNodeId: null,
       codeViewerOpen: false,
@@ -477,7 +483,8 @@ export const useDashboardStore = create<DashboardStore>()((set, get) => ({
       containerSizeMemory: new Map(),
       expandedContainers: new Set(),
       pendingFocusContainer: null,
-    }),
+    });
+  },
 
   setFocusNode: (nodeId) =>
     set({

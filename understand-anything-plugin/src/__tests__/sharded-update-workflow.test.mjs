@@ -970,17 +970,8 @@ describe("sharded update workflow assemble-shard", () => {
     expect(candidate.nodes.map((node) => node.id)).toEqual([
       "file:src/kept.ts",
       "file:src/a.ts",
-      "function:src/a.ts:new",
     ]);
-    expect(candidate.edges).toEqual([
-      {
-        source: "file:src/a.ts",
-        target: "function:src/a.ts:new",
-        type: "contains",
-        direction: "forward",
-        weight: 1,
-      },
-    ]);
+    expect(candidate.edges).toEqual([]);
     expect(candidate).not.toHaveProperty("layers");
     expect(candidate).not.toHaveProperty("tour");
 
@@ -1168,7 +1159,6 @@ describe("sharded update workflow assemble-shard", () => {
       "file:src/kept.ts",
       "file:src/shared.ts",
       "file:src/a.ts",
-      "function:src/a.ts:new",
     ]);
     expect(candidate.nodes.find((node) => node.id === "file:src/kept.ts")).toMatchObject({
       summary: "Kept from batch",
@@ -1589,17 +1579,10 @@ describe("sharded update workflow commit", () => {
     expect(finalShard.shardId).toBeUndefined();
     expect(finalShard.nodes.map((node) => node.id)).toEqual([
       "file:src/keep.ts",
-      "function:src/keep.ts:keep",
       "file:src/modify.ts",
-      "function:src/modify.ts:newName",
       "file:src/add.ts",
-      "function:src/add.ts:add",
     ]);
-    expect(finalShard.edges.map((edge) => `${edge.source}->${edge.target}`)).toEqual([
-      "file:src/keep.ts->function:src/keep.ts:keep",
-      "file:src/modify.ts->function:src/modify.ts:newName",
-      "file:src/add.ts->function:src/add.ts:add",
-    ]);
+    expect(finalShard.edges).toEqual([]);
 
     const finalManifest = JSON.parse(readFileSync(manifestPath, "utf-8"));
     expect(finalManifest.update.gitCommitHash).toBe(head);

@@ -16,16 +16,15 @@ The knowledge graph JSON has this structure:
   - Node types: file, module, concept
   - IDs: `file:path`
 - `edges[]` — each has {source, target, type, direction, weight}
-  - Key types: imports, contains, calls, depends_on
-- `layers[]` — each has {id, name, description, nodeIds[]}
-- `tour[]` — each has {order, title, description, nodeIds[]}
+  - Key types: imports, depends_on, tested_by
+- `layers[]` / `tour[]` — optional; may be absent in current pipeline output
 
 ## How to Read Efficiently
 
 1. Use Grep to search within the JSON for relevant entries BEFORE reading the full file
 2. Only read sections you need — don't dump the entire graph into context
 3. Node names and summaries are the most useful fields for understanding
-4. Edges tell you how components connect — follow imports and calls for dependency chains
+4. Edges tell you how components connect — follow `imports` and `depends_on` for dependency chains
 
 ## Sharded Graph Handling
 

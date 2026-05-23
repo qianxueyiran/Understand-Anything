@@ -32,6 +32,31 @@ const SOURCE_EXTENSIONS = new Set([
   ".php",
 ]);
 
+const SYMBOL_NODE_TYPES = new Set(["function", "class"]);
+const SYMBOL_EDGE_TYPES = new Set([
+  "contains",
+  "exports",
+  "calls",
+  "inherits",
+  "implements",
+]);
+
+function stripSymbolGraph(nodes, edges) {
+  const symbolIds = new Set(
+    (nodes ?? [])
+      .filter((node) => SYMBOL_NODE_TYPES.has(node?.type) && typeof node?.id === "string")
+      .map((node) => node.id),
+  );
+  const keptNodes = (nodes ?? []).filter((node) => !SYMBOL_NODE_TYPES.has(node?.type));
+  const keptEdges = (edges ?? []).filter(
+    (edge) =>
+      !SYMBOL_EDGE_TYPES.has(edge?.type)
+      && !symbolIds.has(edge?.source)
+      && !symbolIds.has(edge?.target),
+  );
+  return { nodes: keptNodes, edges: keptEdges };
+}
+
 function readJson(path) {
   return JSON.parse(readFileSync(path, "utf-8"));
 }
@@ -426,10 +451,16 @@ function mergeRetainedGraphWithBatches(retainedGraph, batches) {
     }
   }
 
-  return omitLayersAndTour({
+  const merged = omitLayersAndTour({
     ...retainedGraph,
     nodes: [...nodesById.values()],
     edges: [...edgesByKey.values()],
+  });
+  const stripped = stripSymbolGraph(merged.nodes, merged.edges);
+  return omitLayersAndTour({
+    ...merged,
+    nodes: stripped.nodes,
+    edges: stripped.edges,
   });
 }
 
@@ -899,6 +930,12 @@ function validatePublishedShardGraph(shardId, graph) {
     warnings.push(`${shardId} published shard must not include tour`);
   }
 
+  for (const node of nodes) {
+    if (SYMBOL_NODE_TYPES.has(node.type)) {
+      warnings.push(`${shardId} published shard has symbol node ${node.id} (type: ${node.type})`);
+    }
+  }
+
   return warnings;
 }
 
@@ -1056,6 +1093,9 @@ function commitShardedUpdate(projectRoot, args = []) {
     }
 
     const finalGraph = stripTransientShardMetadata(candidate);
+    const stripped = stripSymbolGraph(finalGraph.nodes, finalGraph.edges);
+    finalGraph.nodes = stripped.nodes;
+    finalGraph.edges = stripped.edges;
     pendingWrites.push(() => {
       writeJson(shardPath, finalGraph);
       writeJson(

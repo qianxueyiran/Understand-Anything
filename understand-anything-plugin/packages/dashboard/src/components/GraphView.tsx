@@ -23,7 +23,7 @@ import type { PortalFlowNode } from "./PortalNode";
 import ContainerNode from "./ContainerNode";
 import type { ContainerFlowNode, ContainerNodeData } from "./ContainerNode";
 import Breadcrumb from "./Breadcrumb";
-import { useDashboardStore } from "../store";
+import { FLAT_LAYER_ID, useDashboardStore } from "../store";
 import type {
   GraphEdge,
   GraphNode,
@@ -396,10 +396,8 @@ function useLayerDetailTopology(): LayerDetailTopology & {
   const built = useMemo(() => {
     if (!graph || !activeLayerId) return null;
 
-    const activeLayer = (graph.layers ?? []).find((l) => l.id === activeLayerId);
-    if (!activeLayer) return null;
-
-    const layerNodeIds = new Set(activeLayer.nodeIds);
+    const layers = graph.layers ?? [];
+    const activeLayer = layers.find((l) => l.id === activeLayerId);
 
     const allVisibleTypes = new Set([
       "file", "module", "concept",
@@ -407,6 +405,19 @@ function useLayerDetailTopology(): LayerDetailTopology & {
       "endpoint", "pipeline", "schema", "resource",
       "domain", "flow", "step",
     ]);
+
+    let layerNodeIds: Set<string>;
+    if (activeLayerId === FLAT_LAYER_ID || (!activeLayer && layers.length === 0)) {
+      layerNodeIds = new Set(
+        graph.nodes
+          .filter((n) => allVisibleTypes.has(n.type))
+          .map((n) => n.id),
+      );
+    } else if (!activeLayer) {
+      return null;
+    } else {
+      layerNodeIds = new Set(activeLayer.nodeIds);
+    }
 
     let filteredGraphNodes = graph.nodes.filter((n) => {
       if (!layerNodeIds.has(n.id)) return false;

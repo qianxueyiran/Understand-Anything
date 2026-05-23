@@ -309,6 +309,8 @@ Batch the file list from Phase 1 into groups of **20-40 files each** (aim for ~3
 - Non-code files can be mixed with code files in the same batch if batch sizes are small
 - Each file's `fileCategory` from Phase 1 must be included in the batch file list
 
+**注意：无论什么原因，不允许跳过使用subagent执行file-analyzer的步骤！如果运行遇到问题，尝试解决，如果无法解决，停下来寻求帮助！不允许使用脚本模拟执行！**
+
 For each batch, dispatch a subagent using the `file-analyzer` agent definition (at `agents/file-analyzer.md`). Run up to **8 subagents concurrently** using parallel dispatch. Append the following additional context:
 
 > **Additional context from main session:**
@@ -482,6 +484,9 @@ try {
   graph.nodes.forEach((n, i) => {
     if (!n.id) { issues.push(`Node[${i}] missing id`); return; }
     if (!n.type) issues.push(`Node[${i}] '${n.id}' missing type`);
+    if (n.type === 'function' || n.type === 'class') {
+      issues.push(`Symbol node '${n.id}' (type: ${n.type}) must not exist in file-only graphs`);
+    }
     if (!n.name) issues.push(`Node[${i}] '${n.id}' missing name`);
     if (!n.summary) issues.push(`Node[${i}] '${n.id}' missing summary`);
     if (!n.tags || !n.tags.length) issues.push(`Node[${i}] '${n.id}' missing tags`);
@@ -613,7 +618,7 @@ Pass these parameters in the dispatch prompt:
 5. Report a summary to the user containing:
    - Project name and description
    - Files analyzed / total files (with breakdown by fileCategory: code, config, docs, infra, data, script, markup)
-   - Nodes created (broken down by type: file, function, class, config, document, service, table, endpoint, pipeline, schema, resource)
+   - Nodes created (broken down by type: file, config, document, service, table, endpoint, pipeline, schema, resource — code files emit `file` nodes only, not `function`/`class`)
    - Edges created (broken down by type)
    - Any warnings from the reviewer
    - Path to the output file (`$PROJECT_ROOT/.understand-anything/knowledge-graph.json` in full mode, or `$PROJECT_ROOT/.understand-anything/shards/$SHARD_ID.json` in scoped shard mode)
@@ -638,41 +643,34 @@ Pass these parameters in the dispatch prompt:
 
 ## Reference: KnowledgeGraph Schema
 
-### Node Types (13 total)
+### Node Types (file-analyzer output)
+
+Code files produce **`file`** nodes only. The pipeline does not emit `function` or `class` symbol nodes.
+
 | Type | Description | ID Convention |
 |---|---|---|
 | `file` | Source code file | `file:<relative-path>` |
-| `function` | Function or method | `function:<relative-path>:<name>` |
-| `class` | Class, interface, or type | `class:<relative-path>:<name>` |
-| `module` | Logical module or package | `module:<name>` |
-| `concept` | Abstract concept or pattern | `concept:<name>` |
-| `config` | Configuration file (YAML, JSON, TOML, env) | `config:<relative-path>` |
-| `document` | Documentation file (Markdown, RST, TXT) | `document:<relative-path>` |
-| `service` | Deployable service definition (Dockerfile, K8s) | `service:<relative-path>` |
+| `config` | Configuration file | `config:<relative-path>` |
+| `document` | Documentation file | `document:<relative-path>` |
+| `service` | Deployable service (Dockerfile, K8s) | `service:<relative-path>` |
 | `table` | Database table or migration | `table:<relative-path>:<table-name>` |
-| `endpoint` | API endpoint or route definition | `endpoint:<relative-path>:<endpoint-name>` |
-| `pipeline` | CI/CD pipeline configuration | `pipeline:<relative-path>` |
-| `schema` | Schema definition (GraphQL, Protobuf, Prisma) | `schema:<relative-path>` |
-| `resource` | Infrastructure resource (Terraform, CloudFormation) | `resource:<relative-path>` |
+| `endpoint` | API endpoint or route | `endpoint:<relative-path>:<endpoint-name>` |
+| `pipeline` | CI/CD pipeline | `pipeline:<relative-path>` |
+| `schema` | Schema definition | `schema:<relative-path>` |
+| `resource` | Infrastructure resource | `resource:<relative-path>` |
 
-### Edge Types (26 total)
-| Category | Types |
-|---|---|
-| Structural | `imports`, `exports`, `contains`, `inherits`, `implements` |
-| Behavioral | `calls`, `subscribes`, `publishes`, `middleware` |
-| Data flow | `reads_from`, `writes_to`, `transforms`, `validates` |
-| Dependencies | `depends_on`, `tested_by`, `configures` |
-| Semantic | `related`, `similar_to` |
-| Infrastructure | `deploys`, `serves`, `provisions`, `triggers` |
-| Schema/Data | `migrates`, `documents`, `routes`, `defines_schema` |
+Reserved for other agents (not emitted by file-analyzer): `module`, `concept`, `domain`, `flow`, `step`. Legacy graphs may still contain `function`/`class` until re-analyzed.
 
-### Edge Weight Conventions
+### Edge Types (file-analyzer code files)
+
+Code files emit **`imports`**, **`depends_on`**, and **`tested_by`** only (file-level endpoints). Symbol edges (`contains`, `exports`, `calls`, `inherits`, `implements`) are not emitted.
+
+Non-code files may also emit: `configures`, `documents`, `deploys`, `migrates`, `triggers`, `defines_schema`, `serves`, `provisions`, `routes`, `related`.
+
+### Edge Weight Conventions (file-analyzer)
 | Edge Type | Weight |
 |---|---|
-| `contains` | 1.0 |
-| `inherits`, `implements` | 0.9 |
-| `calls`, `exports`, `defines_schema` | 0.8 |
+| `defines_schema` | 0.8 |
 | `imports`, `deploys`, `migrates` | 0.7 |
 | `depends_on`, `configures`, `triggers` | 0.6 |
-| `tested_by`, `documents`, `provisions`, `serves`, `routes` | 0.5 |
-| All others | 0.5 (default) |
+| `tested_by`, `documents`, `provisions`, `serves`, `routes`, `related` | 0.5 |
