@@ -27,13 +27,13 @@ When analyzing a Next.js project, apply these additional conventions on top of t
 
 ### Edge Patterns to Look For
 
-**Layout nesting** — When `app/foo/layout.tsx` wraps `app/foo/page.tsx` and `app/foo/bar/page.tsx`, create `contains` edges from the layout to the pages it wraps. Layouts compose via the file-system hierarchy.
+**Layout nesting** — When `app/foo/layout.tsx` wraps `app/foo/page.tsx` and `app/foo/bar/page.tsx`, create `depends_on` edges from the layout file to each page file it wraps. Layouts compose via the file-system hierarchy — use file-level edges only, not symbol nodes.
 
 **API route handlers** — When a `route.ts` file exports named functions (GET, POST, PUT, DELETE), create edges from consuming components or server actions to the route handler based on fetch calls.
 
 **Server/Client component boundary** — Files with `"use client"` directive at the top are Client Components. All other components in the `app/` directory are Server Components by default. Create `depends_on` edges that cross this boundary and note the boundary in the edge description.
 
-**Parallel routes** — When `app/@slot/page.tsx` patterns appear, create `contains` edges from the parent layout to each parallel slot. These render simultaneously in the same layout.
+**Parallel routes** — When `app/@slot/page.tsx` patterns appear, create `depends_on` edges from the parent layout file to each parallel slot page file. These render simultaneously in the same layout.
 
 **Route groups** — Directories wrapped in parentheses `(group)` organize routes without affecting the URL path. Note these in node descriptions.
 

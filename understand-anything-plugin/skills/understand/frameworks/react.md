@@ -25,7 +25,7 @@ When analyzing a React project, apply these additional conventions on top of the
 
 ### Edge Patterns to Look For
 
-**Component composition** — When a parent component renders a child component in its JSX return, create `contains` edges from the parent to the child. These edges represent the component tree hierarchy.
+**Component composition** — When a parent component file renders a child component from another project file, create a `depends_on` edge from the parent file to the child file. Do not create component symbol nodes.
 
 **Hook usage** — When a component or hook imports and calls a custom hook (`useX`), create `depends_on` edges from the consumer to the hook module. Hooks are the primary mechanism for shared logic in React.
 
