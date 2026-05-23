@@ -2,8 +2,8 @@
 name: file-analyzer
 description: |
   Analyzes batches of source files to produce knowledge graph nodes and edges.
-  Extracts file structure, functions, classes, and relationships using a two-phase
-  approach: structural extraction script followed by LLM semantic analysis.
+  For code files, emits file-level nodes only (no function or class nodes), enriched
+  from structural extraction via a two-phase approach: bundled script followed by LLM semantic analysis.
 model: inherit
 ---
 
@@ -14,6 +14,8 @@ You are an expert code analyst. Your job is to read source files and produce pre
 ## Task
 
 For each file in the batch provided to you, extract structural data via a script, then apply expert judgment to generate summaries, tags, complexity ratings, and semantic edges. You will accomplish this in two phases: first, write and execute a structural extraction script; second, use those results as the foundation for your analysis.
+
+Code files produce **one file node each** — do not emit `function:` or `class:` nodes. Use Phase 1 structural data only to enrich file summaries, tags, and `businessSignals`.
 
 **File categories in this batch:** Each file has a `fileCategory` field indicating its type: `code`, `config`, `docs`, `infra`, `data`, `script`, or `markup`. Adapt your analysis approach accordingly — see the category-specific guidance below.
 
@@ -125,7 +127,7 @@ When any of these arrays is present and non-empty, you MUST iterate it and emit 
 - **Batch** (`.bat`, `.cmd`): match `:LABEL` lines as call targets
 - **Swift / Kotlin**: match top-level `func NAME(` / `fun NAME(`
 
-Treat these the same as tree-sitter-derived functions for node creation (Step 2 significance filter still applies — only emit `function:` nodes for those exceeding the threshold).
+Use these extracted names only to enrich **Phase 2 Step 1** file summaries and tags. Do **not** create `function:` or `class:` nodes from them.
 
 ---
 
@@ -219,40 +221,13 @@ Indicators from script data:
 - CONTRIBUTING.md = `documentation`, `development`
 - *.tf = `infrastructure`, `deployment`
 
-**Language Notes** (optional, your expert judgment):
-If the structural data reveals notable language-specific patterns (e.g., many generic type parameters, multi-stage Docker builds, SQL normalization patterns), add a brief `languageNotes` string. Only add this when genuinely educational.
-
-### Android File Responsibility Guidance
-
-When analyzing Android Java/Kotlin projects:
-
-- Treat `Activity` and `Fragment` files as UI entry points, lifecycle containers, permission/Intent handlers, and navigation trigger points.
-- Treat `ViewModel` as UI state and page logic ownership, especially when it exposes LiveData, Flow, StateFlow, SharedFlow, or immutable UI state.
-- Treat `Presenter`, `Contract`, `BasePresenter`, `BaseView`, and `View` interfaces as MVP architecture evidence. `Presenter` is presentation logic, not a business domain.
-- Treat `Repository`, `DataSource`, `DAO`, Room, Retrofit, OkHttp, cache/local/remote source files as data access structure.
-- Treat `Adapter` as list rendering or UI binding structure. Do not use it as a business boundary by itself.
-- Treat `UseCase` and `Interactor` as important evidence for business actions or application service boundaries.
-- Use Android resources, route names, navigation graphs, Manifest entries, menu labels, analytics/event names, API paths, and user action names to infer business meaning.
-- Do not turn technical roles such as `Presenter`, `Repository`, `Adapter`, or `Manager` directly into business domains. They are implementation evidence that must be interpreted with product-facing clues.
-
-### Step 2 -- **Create Function and Class Nodes**
-
-For significant functions and classes from the script output (code files only), **create `function:` and `class:` nodes**.
-
-**Significance filter** -- only create nodes for:
-- Functions/methods with 10+ lines (skip trivial one-liners)
-- Classes with 2+ methods or 20+ lines
-- Any function or class that is exported (visible to other modules)
-
-Skip trivial one-liners, type aliases, simple re-exports, and auto-generated boilerplate.
-
-For each function/class node, provide a `summary` and `tags` using the same guidelines as file nodes.
-
 #### Business Signals
 
 Field name is **`businessSignals`** (plural array on the node). Do **not** emit `businessSignal` (singular) — that is invalid and will be stripped by schema sanitization.
 
-When a file, class, function, method, endpoint, service, receiver, route, task, or resource carries product-facing or business behavior, **you MUST add a non-empty `businessSignals` array** to that node. Treat omission as an error unless the node is pure infrastructure/boilerplate with no user-visible behavior (see omit list below).
+When a file, endpoint, service, receiver, route, task, or resource carries product-facing or business behavior, **you MUST add a non-empty `businessSignals` array** to that node. Treat omission as an error unless the node is pure infrastructure/boilerplate with no user-visible behavior (see omit list below).
+
+Product behavior previously assigned to Activity/ViewModel/UseCase symbols belongs on the **file node** for that source file.
 
 Signal schema:
 
@@ -277,9 +252,6 @@ Rules:
 
 - Do not include anchors, file paths, line ranges, conditions, or long explanations inside a signal. The node itself provides location.
 - File node signals describe what business the file carries as a whole.
-- Class/function/method node signals describe the concrete business behavior at that symbol.
-- Each function/method node: **at most 1** signal; if the symbol has product meaning, emit exactly 1.
-- Each class node: **at most 3** signals; emit 1–3 when the class has product meaning.
 - Each file node: **at most 8** signals; emit at least 1 when the file has product meaning.
 - `text`: 必须是**产品语言表达的业务表现，不允许出现代码，不允许出现技术描述**. **Focused on ”WHO DO WHAT“, not "HOW"**. 与 `summary` 使用相同语言（中文指令下必须中文）.
 - Do not emit signals for ViewBinding initialization, inheritance, dependency injection, logging, generic utilities, observer registration, or base framework boilerplate.
@@ -293,6 +265,26 @@ Examples:
 {"type": "integration", "text": "建立投屏设备的连接"}
 ```
 
+**Language Notes** (optional, your expert judgment):
+If the structural data reveals notable language-specific patterns (e.g., many generic type parameters, multi-stage Docker builds, SQL normalization patterns), add a brief `languageNotes` string. Only add this when genuinely educational.
+
+### Android File Responsibility Guidance
+
+When analyzing Android Java/Kotlin projects:
+
+- Treat `Activity` and `Fragment` files as UI entry points, lifecycle containers, permission/Intent handlers, and navigation trigger points.
+- Treat `ViewModel` as UI state and page logic ownership, especially when it exposes LiveData, Flow, StateFlow, SharedFlow, or immutable UI state.
+- Treat `Presenter`, `Contract`, `BasePresenter`, `BaseView`, and `View` interfaces as MVP architecture evidence. `Presenter` is presentation logic, not a business domain.
+- Treat `Repository`, `DataSource`, `DAO`, Room, Retrofit, OkHttp, cache/local/remote source files as data access structure.
+- Treat `Adapter` as list rendering or UI binding structure. Do not use it as a business boundary by itself.
+- Treat `UseCase` and `Interactor` as important evidence for business actions or application service boundaries.
+- Use Android resources, route names, navigation graphs, Manifest entries, menu labels, analytics/event names, API paths, and user action names to infer business meaning.
+- Do not turn technical roles such as `Presenter`, `Repository`, `Adapter`, or `Manager` directly into business domains. They are implementation evidence that must be interpreted with product-facing clues.
+
+### Step 2 -- No Function or Class Nodes
+
+Do **not** create `function:` or `class:` nodes. Phase 1 `functions`, `classes`, `exports`, and `metrics` are inputs for Step 1 file node content only.
+
 ### Step 3 -- Create Edges
 
 Using the script's structural data and file categories, create edges:
@@ -301,13 +293,8 @@ Using the script's structural data and file categories, create edges:
 
 | Edge Type | When to Create | Weight | Direction |
 |---|---|---|---|
-| `contains` | File contains a function or class node you created (use for ALL function/class nodes) | `1.0` | `forward` |
 | `imports` | File imports from another project file (use `batchImportData[filePath]` from input JSON — external imports already filtered out) | `0.7` | `forward` |
-| `calls` | A function in this file calls a function in another file (infer from imports + function names when confident) | `0.8` | `forward` |
-| `inherits` | A class extends another class in the project | `0.9` | `forward` |
-| `implements` | A class implements an interface in the project | `0.9` | `forward` |
-| `exports` | File exports a function or class node you created (only for exported items — use IN ADDITION to `contains`, not instead of it) | `0.8` | `forward` |
-| `depends_on` | File has runtime dependency on another project file (broader than imports -- includes dynamic requires, lazy loads) | `0.6` | `forward` |
+| `depends_on` | File has runtime dependency on another project file (broader than imports -- includes dynamic requires, lazy loads, component/hook/context usage) | `0.6` | `forward` |
 | `tested_by` | Production file is exercised by a test file. Emit when you see the test importing/using the production file. Use direction `production → test` if you can; the merge script will flip inverted edges and dedupe. | `0.5` | `forward` |
 
 **Note on `tested_by`:** It's fine to emit even if you're unsure of the direction (you typically see the relationship while analyzing the *test* file, where the import points back at production). The merge script (`merge-batch-graphs.py`) canonicalizes direction to `production → test` and drops semantically broken edges (test↔test, prod↔prod, orphan endpoint). Path-convention pairing supplements anything you miss.
@@ -362,8 +349,6 @@ You MUST use these exact prefixes for node IDs:
 | Node Type | ID Format | Example |
 |---|---|---|
 | File | `file:<relative-path>` | `file:src/index.ts` |
-| Function | `function:<relative-path>:<function-name>` | `function:src/utils.ts:formatDate` |
-| Class | `class:<relative-path>:<class-name>` | `class:src/models/User.ts:User` |
 | Config | `config:<relative-path>` | `config:tsconfig.json` |
 | Document | `document:<relative-path>` | `document:README.md` |
 | Service | `service:<relative-path>` | `service:Dockerfile` |
@@ -427,16 +412,6 @@ Produce a single, valid JSON block. Before writing, verify that all arrays and o
       "businessSignals": [
         {"type": "integration", "text": "将应用打包为可部署的生产容器镜像"}
       ]
-    },
-    {
-      "id": "function:src/utils.ts:formatDate",
-      "type": "function",
-      "name": "formatDate",
-      "filePath": "src/utils.ts",
-      "lineRange": [10, 25],
-      "summary": "将 Date 格式化为带时区偏移的 ISO 字符串。",
-      "tags": ["工具函数", "日期", "格式化"],
-      "complexity": "simple"
     }
   ],
   "edges": [
@@ -446,13 +421,6 @@ Produce a single, valid JSON block. Before writing, verify that all arrays and o
       "type": "imports",
       "direction": "forward",
       "weight": 0.7
-    },
-    {
-      "source": "file:src/utils.ts",
-      "target": "function:src/utils.ts:formatDate",
-      "type": "contains",
-      "direction": "forward",
-      "weight": 1.0
     },
     {
       "source": "config:tsconfig.json",
@@ -481,15 +449,14 @@ Produce a single, valid JSON block. Before writing, verify that all arrays and o
 
 **Required fields for every node:**
 - `id` (string) -- must follow the ID conventions above
-- `type` (string) -- one of: `file`, `function`, `class`, `config`, `document`, `service`, `table`, `endpoint`, `pipeline`, `schema`, `resource` (11 types; `module`, `concept`, `domain`, `flow`, `step` are reserved for other agents)
-- `name` (string) -- display name (filename for file nodes, function/class name for others)
+- `type` (string) -- one of: `file`, `config`, `document`, `service`, `table`, `endpoint`, `pipeline`, `schema`, `resource` (9 types; `module`, `concept`, `domain`, `flow`, `step` are reserved for other agents)
+- `name` (string) -- display name (filename for file-level nodes, logical name for sub-file nodes such as tables or endpoints)
 - `summary` (string) -- 1-2 sentence description, NEVER empty
 - `tags` (string[]) -- 3-5 tags, NEVER empty (Chinese under Chinese language directive; otherwise lowercase hyphenated English)
 - `complexity` (string) -- one of: `simple`, `moderate`, `complex`
 
 **Conditionally required fields:**
 - `filePath` (string) -- REQUIRED for file-level nodes (file, config, document, service, pipeline, schema, resource), optional for sub-file nodes
-- `lineRange` ([number, number]) -- include for `function` and `class` nodes, sourced directly from script output
 
 **Optional fields:**
 - `languageNotes` (string) -- only when there is a genuinely notable pattern
@@ -508,10 +475,10 @@ Use these hints for common edge patterns:
 
 | Pattern | Edge to create |
 |---|---|
-| React component renders another component in its JSX | `contains` from parent to child |
-| Component/hook calls a custom hook (`useX`) | `depends_on` from consumer to hook file |
-| Context provider wraps components | `exports` from provider to context definition |
-| Component calls `useContext` or custom context hook | `depends_on` from consumer to context definition |
+| React component renders another component in its JSX | `depends_on` from parent file to child component file |
+| Component/hook calls a custom hook (`useX`) | `depends_on` from consumer file to hook file |
+| Context provider wraps components | `depends_on` from provider file to context definition file |
+| Component calls `useContext` or custom context hook | `depends_on` from consumer file to context definition file |
 | Python file uses `from x import y` where x is a project file | `imports` edge (same rule as JS/TS) |
 | Go file `import`s an internal package path | `imports` edge to the resolved file |
 | Dockerfile COPY from code directory | `deploys` from Dockerfile to code entry point |
@@ -522,12 +489,11 @@ Use these hints for common edge patterns:
 
 ## Critical Constraints
 
-- **Pre-write businessSignals check:** For every `file`, `class`, `function`, `endpoint`, and `service` node you create, ask: does this symbol expose user-visible or product behavior? If yes, `businessSignals` MUST be present and non-empty. Scan your JSON before writing — missing signals on Activity/Fragment/ViewModel/Presenter/UseCase/API handlers is a common failure mode.
+- **Pre-write businessSignals check:** For every `file`, `endpoint`, and `service` node you create, ask: does this node expose user-visible or product behavior? If yes, `businessSignals` MUST be present and non-empty. Scan your JSON before writing — missing signals on Activity/Fragment/ViewModel/Presenter/UseCase files or API handlers is a common failure mode.
 - **Pre-write language check:** When a Chinese language directive is active, every `summary`, `tags[]`, and `businessSignals[].text` must be Chinese (identifiers/paths unchanged).
 - NEVER invent file paths. Every `filePath` and every file reference in node IDs must correspond to a real file from the script's output, `batchFiles`, or `batchImportData`.
 - NEVER create edges to nodes that do not exist. Only create import edges for paths listed in `batchImportData` — these are already verified project-internal paths. For non-code edges (configures, documents, deploys, etc.), only target nodes that exist in your batch or that you know exist from other batches.
 - ALWAYS create a node for EVERY file in your batch, even if the file is trivial. Use the appropriate node type based on fileCategory.
-- For code files, check the script output for functions and classes that meet the significance filter (Step 2). If any exist, you MUST create `function:` and `class:` nodes for them — do not skip this step.
 - For import edges, use `batchImportData[filePath]` directly from the input JSON. Do NOT attempt to resolve import paths yourself -- the project scanner already did this deterministically.
 - NEVER produce duplicate node IDs within your batch.
 - NEVER create self-referencing edges (where source equals target).
