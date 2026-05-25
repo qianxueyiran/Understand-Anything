@@ -584,260 +584,6 @@ function buildShardFingerprintStore(projectRoot, shardId, graph, gitCommitHash) 
   };
 }
 
-function planDownstream(projectRoot, manifest, previousShardUpdates, codeShards, plan, args, warnings) {
-  const uaDir = join(projectRoot, ".understand-anything");
-  const requested = {
-    domain: hasFlag(args, "--with-domain"),
-    product: hasFlag(args, "--with-product"),
-  };
-  const changedCodeShards = codeShards.filter((shard) => {
-    const previousHash = previousShardUpdates[shard.id]?.artifactHash;
-    const nextHash = manifest.update?.shards?.[shard.id]?.artifactHash;
-    return nextHash && previousHash !== nextHash;
-  }).map((shard) => shard.id);
-
-  const downstreamPlan = {
-    runId: plan.runId,
-    baseCommitHash: plan.baseCommitHash,
-    headCommitHash: plan.headCommitHash,
-    requested,
-    changedCodeShards,
-    domainShardsToRebuild: [],
-    productShardsToRebuild: [],
-    warnings,
-  };
-
-  if (requested.domain) {
-    const domainManifestPath = join(uaDir, "domain-graph.json");
-    if (!existsSync(domainManifestPath)) {
-      warnings.push("domain-graph.json is missing; skipped requested domain follow-up");
-    } else {
-      const domainManifest = readJson(domainManifestPath);
-      if (domainManifest.kind !== "domain-sharded") {
-        warnings.push("domain-graph.json is not domain-sharded; skipped requested domain follow-up");
-      } else {
-        const domainShardIds = new Set((domainManifest.shards ?? []).map((shard) => shard.id));
-        downstreamPlan.domainShardsToRebuild = changedCodeShards.filter((id) => domainShardIds.has(id));
-      }
-    }
-  }
-
-  if (requested.product) {
-    const productManifestPath = join(uaDir, "product-index.json");
-    if (!existsSync(productManifestPath)) {
-      warnings.push("product-index.json is missing; skipped requested product follow-up");
-    } else {
-      const productManifest = readJson(productManifestPath);
-      if (productManifest.kind !== "product-sharded") {
-        warnings.push("product-index.json is not product-sharded; skipped requested product follow-up");
-      } else {
-        const productShardIds = new Set((productManifest.shards ?? []).map((shard) => shard.id));
-        downstreamPlan.productShardsToRebuild = changedCodeShards.filter((id) => productShardIds.has(id));
-      }
-    }
-  }
-
-  writeJson(join(uaDir, "intermediate", "sharded-downstream-plan.json"), downstreamPlan);
-  return requested.domain || requested.product;
-}
-
-function requestedDownstreamShardIds(run, type, args, downstreamPlan) {
-  if (!hasFlag(args, `--with-${type}`)) {
-    return undefined;
-  }
-
-  const key = `${type}ShardsToRebuild`;
-  const downstream = run.downstream ?? {};
-  const section = downstream[type] ?? {};
-  const requested = section.requested === true || downstream.requested?.[type] === true || run.requested?.[type] === true;
-  const shardsToRebuild =
-    section.shardsToRebuild ??
-    section[key] ??
-    downstream[key] ??
-    run[key] ??
-    [];
-
-  if (!requested && shardsToRebuild.length === 0) {
-    const planRequested = downstreamPlan?.requested?.[type] === true;
-    const planShardsToRebuild = downstreamPlan?.[key] ?? [];
-    if (!planRequested && planShardsToRebuild.length === 0) {
-      return undefined;
-    }
-    return planShardsToRebuild;
-  }
-  return shardsToRebuild;
-}
-
-function readCurrentDownstreamPlan(projectRoot, run, warnings) {
-  const planPath = join(projectRoot, ".understand-anything", "intermediate", "sharded-downstream-plan.json");
-  if (!existsSync(planPath)) {
-    return undefined;
-  }
-
-  const plan = readJson(planPath);
-  if (
-    plan.runId !== run.runId ||
-    plan.baseCommitHash !== run.baseCommitHash ||
-    plan.headCommitHash !== run.headCommitHash
-  ) {
-    appendWarning(warnings, "sharded downstream plan does not belong to this sharded update run");
-    return { rejected: true };
-  }
-  return { plan, rejected: false };
-}
-
-function validateDownstreamResult(projectRoot, run, type, shardId, warnings) {
-  const resultPath = join(
-    projectRoot,
-    ".understand-anything",
-    "intermediate",
-    `${type}-shards`,
-    shardId,
-    `${type}-update-result.json`,
-  );
-  if (!existsSync(resultPath)) {
-    appendWarning(warnings, `${shardId} ${type} rebuild result is missing for current run`);
-    return undefined;
-  }
-
-  const result = readJson(resultPath);
-  if (!isCurrentRunArtifact(result, run, shardId)) {
-    appendWarning(warnings, `${shardId} ${type} rebuild result does not belong to this sharded update run`);
-    return undefined;
-  }
-  if (result.status !== "success") {
-    appendWarning(
-      warnings,
-      `${shardId} ${type} rebuild result failed: ${result.warning ?? result.status ?? "unknown status"}`,
-    );
-    return undefined;
-  }
-  if (!result.artifactHash) {
-    appendWarning(warnings, `${shardId} ${type} rebuild result is missing artifactHash`);
-    return undefined;
-  }
-  return result;
-}
-
-function validateDownstreamCommit(projectRoot, run, args, warnings) {
-  if (!hasFlag(args, "--with-domain") && !hasFlag(args, "--with-product")) {
-    return undefined;
-  }
-
-  const planRequest = readCurrentDownstreamPlan(projectRoot, run, warnings);
-  if (planRequest?.rejected) {
-    return {
-      requested: { domain: [], product: [] },
-      results: { domain: new Map(), product: new Map() },
-      rejected: true,
-    };
-  }
-  const requested = {
-    domain: requestedDownstreamShardIds(run, "domain", args, planRequest?.plan),
-    product: requestedDownstreamShardIds(run, "product", args, planRequest?.plan),
-  };
-  if (!requested.domain && !requested.product) {
-    return undefined;
-  }
-
-  const results = { domain: new Map(), product: new Map() };
-  let rejected = false;
-  for (const shardId of requested.domain ?? []) {
-    const result = validateDownstreamResult(projectRoot, run, "domain", shardId, warnings);
-    if (!result) {
-      rejected = true;
-    } else {
-      results.domain.set(shardId, result);
-    }
-  }
-  for (const shardId of requested.product ?? []) {
-    const result = validateDownstreamResult(projectRoot, run, "product", shardId, warnings);
-    if (!result) {
-      rejected = true;
-    } else {
-      results.product.set(shardId, result);
-    }
-  }
-
-  return { requested, results, rejected };
-}
-
-function writeValidatedDownstreamMetadata(projectRoot, codeManifest, downstreamCommit, now, warnings) {
-  const uaDir = join(projectRoot, ".understand-anything");
-  let domainManifest;
-
-  if (downstreamCommit.requested.domain) {
-    const domainManifestPath = join(uaDir, "domain-graph.json");
-    domainManifest = readJson(domainManifestPath);
-    const domainShards = { ...(domainManifest.update?.shards ?? {}) };
-
-    for (const shardId of downstreamCommit.requested.domain) {
-      const result = downstreamCommit.results.domain.get(shardId);
-      const update = {
-        ...domainShards[shardId],
-        artifactHash: result.artifactHash,
-        sourceCodeArtifactHash: codeManifest.update?.shards?.[shardId]?.artifactHash,
-        lastRebuiltAt: now,
-      };
-      if (result.traceArtifactHash) {
-        update.traceArtifactHash = result.traceArtifactHash;
-      }
-      domainShards[shardId] = update;
-    }
-
-    domainManifest.update = {
-      updatedAt: now,
-      shards: domainShards,
-      warnings,
-    };
-    writeJson(domainManifestPath, domainManifest);
-  }
-
-  if (downstreamCommit.requested.product) {
-    const productManifestPath = join(uaDir, "product-index.json");
-    const productManifest = readJson(productManifestPath);
-    const needsDomainMetadata = (productManifest.shards ?? []).some((shard) => shard.sourceDomainShard);
-    if (!domainManifest && needsDomainMetadata) {
-      const domainManifestPath = join(uaDir, "domain-graph.json");
-      if (existsSync(domainManifestPath)) {
-        domainManifest = readJson(domainManifestPath);
-      }
-    }
-    const productShards = { ...(productManifest.update?.shards ?? {}) };
-
-    for (const shardId of downstreamCommit.requested.product) {
-      const shard = (productManifest.shards ?? []).find((candidate) => candidate.id === shardId);
-      const result = downstreamCommit.results.product.get(shardId);
-      const domainShard = (domainManifest?.shards ?? []).find((candidate) =>
-        candidate.id === shardId || (shard?.sourceDomainShard && candidate.path === shard.sourceDomainShard),
-      );
-      const sourceDomainArtifactHash =
-        domainManifest?.update?.shards?.[domainShard?.id ?? shardId]?.artifactHash ??
-        productShards[shardId]?.sourceDomainArtifactHash;
-      const update = {
-        ...productShards[shardId],
-        artifactHash: result.artifactHash,
-        sourceCodeArtifactHash: codeManifest.update?.shards?.[shardId]?.artifactHash,
-        lastRebuiltAt: now,
-      };
-      if (sourceDomainArtifactHash) {
-        update.sourceDomainArtifactHash = sourceDomainArtifactHash;
-      }
-      if (result.traceArtifactHash) {
-        update.traceArtifactHash = result.traceArtifactHash;
-      }
-      productShards[shardId] = update;
-    }
-
-    productManifest.update = {
-      updatedAt: now,
-      shards: productShards,
-      warnings,
-    };
-    writeJson(productManifestPath, productManifest);
-  }
-}
-
 function refreshCodeManifestSummary(uaDir, manifest, warnings) {
   let nodeCount = 0;
   let edgeCount = 0;
@@ -998,6 +744,12 @@ function collectCandidateContentWarnings(runShard, candidate) {
 }
 
 function commitShardedUpdate(projectRoot, args = []) {
+  if (hasFlag(args, "--with-domain") || hasFlag(args, "--with-product")) {
+    throw new Error(
+      "--with-domain and --with-product were removed from sharded update commit; use /understand-refresh to orchestrate product/domain refresh.",
+    );
+  }
+
   const uaDir = join(projectRoot, ".understand-anything");
   const manifestPath = join(uaDir, "knowledge-graph.json");
   const manifest = readJson(manifestPath);
@@ -1142,41 +894,17 @@ function commitShardedUpdate(projectRoot, args = []) {
     };
   }
 
-  const downstreamCommit = validateDownstreamCommit(projectRoot, run, args, warnings);
   const finalWarnings = [...warnings];
   for (const publishedWarning of collectPublishedShardWarnings(manifest, uaDir)) {
     appendWarning(finalWarnings, publishedWarning);
   }
   manifest.update = {
-    gitCommitHash: downstreamCommit?.rejected ? previousGitCommitHash : run.headCommitHash,
+    gitCommitHash: run.headCommitHash,
     updatedAt: now,
     shards: nextShardUpdates,
     warnings: finalWarnings,
   };
   refreshCodeManifestSummary(uaDir, manifest, finalWarnings);
-  if (downstreamCommit) {
-    if (!downstreamCommit.rejected) {
-      writeValidatedDownstreamMetadata(projectRoot, manifest, downstreamCommit, now, warnings);
-    }
-  } else {
-    const hasRequestedDownstream = planDownstream(
-      projectRoot,
-      manifest,
-      previousShardUpdates,
-      successfulCodeShards,
-      {
-        runId: run.runId,
-        baseCommitHash: run.baseCommitHash,
-        headCommitHash: run.headCommitHash,
-        warnings: run.warnings ?? [],
-      },
-      args,
-      warnings,
-    );
-    if (hasRequestedDownstream) {
-      manifest.update.gitCommitHash = previousGitCommitHash;
-    }
-  }
   writeJson(manifestPath, manifest);
 }
 
@@ -1185,7 +913,7 @@ const REMOVED_COMMANDS = {
   "write-batch-existing": "assemble-shard",
   "finalize-code": "assemble-shard and commit",
   "finalize-manifest": "commit",
-  "finalize-downstream": "commit --with-domain/--with-product",
+  "finalize-downstream": "/understand-refresh",
 };
 
 function main() {

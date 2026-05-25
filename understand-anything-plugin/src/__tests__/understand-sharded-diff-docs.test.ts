@@ -16,8 +16,8 @@ describe("understand sharded diff docs", () => {
     expect(skill).toContain("--update-diff");
     expect(skill).toContain("codebase-sharded");
     expect(skill).toContain("sharded file-level incremental");
-    expect(skill).toContain("--with-domain");
-    expect(skill).toContain("--with-product");
+    expect(skill).not.toContain("--with-domain");
+    expect(skill).not.toContain("--with-product");
   });
 
   it("documents the executable sharded update workflow ownership", () => {
@@ -89,20 +89,18 @@ describe("understand sharded diff docs", () => {
     expect(workflow).not.toContain("architecture-analyzer");
     expect(workflow).not.toContain("tour-builder");
     expect(workflow).toContain("assemble-shard --shard <id>");
-    expect(workflow).toContain("commit [--with-domain] [--with-product]");
+    expect(workflow).toContain("commit");
     expect(workflow).toContain("knowledge-graph.json.update.gitCommitHash");
     expect(workflow).toContain("candidate-shard.json");
-    expect(workflow).toContain("current-run result");
     expect(workflow).toContain("rejects");
     expect(workflow).toContain("stale");
     expect(workflow).toContain("missing");
     expect(workflow).toContain("failed");
-    expect(workflow).toContain(
+    expect(workflow).not.toContain(
       "keeps `knowledge-graph.json.update.gitCommitHash` at the previous commit while downstream work is pending",
     );
-    expect(workflow).toContain(
-      "rerun `commit [--with-domain] [--with-product]` after `/understand-domain` and/or `/understand-product` produce current-run result files",
-    );
+    expect(workflow).not.toContain("product-update-result.json");
+    expect(workflow).not.toContain("domain-update-result.json");
     expect(workflow).toContain("### Run Status Contract");
     expect(workflow).toContain("### Shard Status Contract");
     expect(workflow).toContain("### Assemble Result Status Contract");
@@ -133,7 +131,7 @@ describe("understand sharded diff docs", () => {
     expect(workflow).toContain("assemble-shard --shard <id>");
     expect(workflow).toContain("intermediate/sharded/<shardId>/batch-001.json");
     expect(workflow).toContain("candidate-shard.json");
-    expect(workflow).toContain("sharded-downstream-plan.json");
+    expect(workflow).not.toContain("sharded-downstream-plan.json");
     expect(workflow).toContain("file-analyzer` dispatch (sharded update-diff only)");
     expect(workflow).not.toContain("architecture-analyzer` / `tour-builder` dispatch");
     expect(skill).not.toContain("architecture-analyzer");
@@ -142,6 +140,20 @@ describe("understand sharded diff docs", () => {
     expect(workflow).toContain("Legacy commands");
     expect(workflow).toContain("are removed");
     expect(workflow).not.toContain("sharded-update-workflow.mjs $PROJECT_ROOT prepare");
+  });
+
+  it("documents product/domain refresh orchestration in a separate skill", () => {
+    const skill = readFileSync(
+      join(pluginRoot, "skills", "understand-refresh", "SKILL.md"),
+      "utf-8",
+    );
+
+    expect(skill).toContain("/understand --update-diff");
+    expect(skill).toContain("/understand-domain --shard <id>");
+    expect(skill).toContain("/understand-product --shard <id>");
+    expect(skill).toContain("/understand-domain --refresh-shards");
+    expect(skill).toContain("/understand-product --refresh-shards");
+    expect(skill).toContain("不要求 `/understand` 等待 product/domain current-run result");
   });
 
   it("documents the hook sharded branch", () => {

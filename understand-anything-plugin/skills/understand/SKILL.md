@@ -1,7 +1,7 @@
 ---
 name: understand
 description: Analyze a codebase to produce an interactive knowledge graph for understanding architecture, components, and relationships
-argument-hint: ["[path] [--full|--update-diff|--with-domain|--with-product|--auto-update|--no-auto-update|--review|--language <lang>|--scope <paths>|--shard <id>]"]
+argument-hint: ["[path] [--full|--update-diff|--auto-update|--no-auto-update|--review|--language <lang>|--scope <paths>|--shard <id>]"]
 ---
 
 # /understand
@@ -19,9 +19,7 @@ Analyze the current codebase and produce a `knowledge-graph.json` file in `.unde
 
 - `$ARGUMENTS` may contain:
   - `--full` — Force a full rebuild, ignoring any existing graph
-  - `--update-diff` — 显式根据 git diff 更新既有 graph。普通 `knowledge-graph.json` 复用现有非分片增量路径；当根 graph 为 `kind: "codebase-sharded"` 时，执行 sharded file-level incremental（分片文件级增量）并一次性更新所有受影响 shards。
-  - `--with-domain` — 仅在 sharded 项目使用 `--update-diff` 时有效。只重建 code shard artifact hash 发生变化的对应 domain shards。
-  - `--with-product` — 仅在 sharded 项目使用 `--update-diff` 时有效。只重建 code shard artifact hash 发生变化的对应 product shards。
+  - `--update-diff` — 显式根据 git diff 更新既有 graph。普通 `knowledge-graph.json` 复用现有非分片增量路径；当根 graph 为 `kind: "codebase-sharded"` 时，只执行 code shard 的 sharded file-level incremental（分片文件级增量）并一次性更新所有受影响 code shards。
   - `--auto-update` — Enable automatic graph updates on commit (writes `autoUpdate: true` to `.understand-anything/config.json`)
   - `--no-auto-update` — Disable automatic graph updates (writes `autoUpdate: false` to `.understand-anything/config.json`)
   - `--review` — Run full LLM graph-reviewer instead of inline deterministic validation
@@ -173,7 +171,7 @@ Determine whether to run a full analysis or incremental update.
    | `SCOPED_SHARD_MODE=true` | Always run scoped full analysis for the requested scope roots. Ignore existing main `knowledge-graph.json` / `meta.json` state for unchanged, incremental, and review-only decisions. `--review` does not change this scoped shard rebuild decision; it only controls whether Phase 4 uses the LLM reviewer. |
    | `--full` flag in `$ARGUMENTS` | Full analysis (all phases) |
    | `--update-diff` + existing graph `kind !== "codebase-sharded"` | Existing non-sharded incremental update path |
-   | `--update-diff` + existing graph `kind === "codebase-sharded"` | Sharded file-level incremental update. Compute one global git diff, map changed files to affected shards, patch every affected shard, refresh manifests, and advance `knowledge-graph.json.update.gitCommitHash` only after all requested work succeeds. |
+   | `--update-diff` + existing graph `kind === "codebase-sharded"` | Sharded file-level incremental update. Compute one global git diff, map changed files to affected code shards, patch every affected code shard, refresh the code manifest, and advance `knowledge-graph.json.update.gitCommitHash` after code shard work succeeds. Product/domain refresh is handled by `/understand-refresh`, not by `/understand`. |
    | No existing graph or meta | Full analysis (all phases) |
    | `--review` flag + existing graph + unchanged commit hash | Skip to Phase 4 (review-only — reuse existing assembled graph) |
    | Existing graph + unchanged commit hash | Ask the user: "The graph is up to date at this commit. Would you like to: **(a)** run a full rebuild (`--full`), **(b)** run the LLM graph reviewer (`--review`), or **(c)** do nothing?" Then follow their choice. If they pick (c), STOP. |
@@ -354,10 +352,12 @@ Full mode:
 python <SKILL_DIR>/merge-batch-graphs.py $PROJECT_ROOT
 ```
 
-Scoped shard mode (shard output path enables external `imports` edges automatically):
+Scoped shard mode (same staging path as full mode; retain cross-shard `imports` edges):
 ```bash
-python <SKILL_DIR>/merge-batch-graphs.py $PROJECT_ROOT --output $PROJECT_ROOT/.understand-anything/shards/$SHARD_ID.json
+python <SKILL_DIR>/merge-batch-graphs.py $PROJECT_ROOT --preserve-external
 ```
+
+Both modes write Phase 2 output to `$PROJECT_ROOT/.understand-anything/intermediate/assembled-graph.json`. Do **not** pass `--output` to `shards/$SHARD_ID.json` here — Phase 3/4 review and validate the intermediate staging file; Phase 5 publishes the final shard graph.
 
 This script reads all `batch-*.json` files from `$PROJECT_ROOT/.understand-anything/intermediate/`, then in one pass:
 - Combines all nodes and edges across batches
@@ -365,7 +365,7 @@ This script reads all `batch-*.json` files from `$PROJECT_ROOT/.understand-anyth
 - Normalizes complexity values (`low`→`simple`, `medium`→`moderate`, `high`→`complex`, etc.)
 - Rewrites edge references to match corrected node IDs
 - Deduplicates nodes by ID (keeps last occurrence) and edges by `(source, target, type)`
-- Drops dangling edges referencing missing nodes
+- Drops dangling edges referencing missing nodes (except cross-shard `imports` when `--preserve-external` is set)
 - Logs all corrections and dropped items to stderr
 
 The merge script also runs a `tested_by` linker that canonicalizes test-coverage edges in two passes. **Pass 1** walks LLM-emitted `tested_by` edges and flips inverted ones in place (the LLM systematically emits `test → production` because it sees the import only when analyzing the test file); semantically broken edges (test↔test, prod↔prod, orphan endpoints) are dropped. **Pass 2** supplements with path-convention pairings (`X.ts` ↔ `X.test.ts`, JS/TS `__tests__/` and `<dir>/test/` walk-out, Python in-package `tests/`, Go `_test.go` sibling, Maven/Gradle `src/test/...` ↔ `src/main/...`, .NET `<svc>/tests/` ↔ `<svc>/src/...` and `<App>.Tests/` ↔ `<App>/`). Production nodes that end up sourcing any `tested_by` edge get a `"tested"` tag. All resulting edges run `production → test`.
