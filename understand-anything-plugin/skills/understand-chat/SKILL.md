@@ -34,14 +34,14 @@ If `.understand-anything/knowledge-graph.json` has top-level `kind: "codebase-sh
 For sharded graphs:
 
 1. Read only the manifest metadata and `shards[].path` list.
-2. Search with `rg` under `.understand-anything/shards/` by `nodeId`, `filePath`, `"summary"`, `"tags"`, and semantic keywords.
+2. Search with `rg` under `.understand-anything/shards/` by `nodeId`, `filePath`, `"summary"`, `"tags"`, `"businessSignals"`,and semantic keywords.
 3. Read only matching shard files. If an edge points to a node outside the matching shard, search that raw edge `source` or `target` id with `rg` under `.understand-anything/shards/` and read only the shard that contains the referenced node.
 4. Keep edge `source` and `target` values unchanged. They are stable addresses across shards.
 5. Read the source file from the node's project-relative `filePath`, not from a path relative to the shard.
 
 ## Instructions
 
-1. Check that `.understand-anything/knowledge-graph.json` exists. If not, tell the user to run `/understand` first.
+1. Check  `.understand-anything/knowledge-graph.json` .
 
 2. **Inspect graph mode** — read the top-level `kind` first. If it is `codebase-sharded`, follow the sharded graph handling rules above and use `.understand-anything/shards/` as the graph search root. Otherwise use `.understand-anything/knowledge-graph.json`.
 

@@ -273,6 +273,7 @@ const DEFAULT_HUB_DEGREE_THRESHOLD = 80;
 const DEFAULT_MAX_BOUNDARY_NEIGHBORS = 16;
 const DEFAULT_MAX_FILES_PER_TOPIC = 30;
 const DEFAULT_MAX_ANCHORS_PER_FILE = 5;
+const RECALL_MAX_DEPTH = 6;
 const STRONG_HUB_PRODUCT_SCORE = 0.7;
 const HUB_SCORE_PENALTY = 0.25;
 const BOUNDARY_SIGNAL_TYPES = new Set(["entry", "display", "rule", "data", "integration"]);
@@ -890,22 +891,41 @@ function recallTopicNodes(
   adjacency: Map<string, WeightedNeighbor[]>,
 ): Map<string, Set<string>> {
   const recalled = new Map<string, Set<string>>();
+  const visited = new Set<string>();
+  const queue: Array<{ nodeId: string; depth: number }> = [];
 
   for (const rootNodeId of rootNodeIds) {
     if (!nodeById.has(rootNodeId)) {
       continue;
     }
 
+    visited.add(rootNodeId);
+    queue.push({ nodeId: rootNodeId, depth: 0 });
     addRecallReason(recalled, rootNodeId, "root");
-    const firstHop = adjacency.get(rootNodeId) ?? [];
-    for (const neighbor of firstHop) {
-      addRecallReason(recalled, neighbor.nodeId, "direct-neighbor");
+  }
 
-      for (const secondHop of adjacency.get(neighbor.nodeId) ?? []) {
-        const secondHopNode = nodeById.get(secondHop.nodeId);
-        if (secondHopNode?.businessSignals && secondHopNode.businessSignals.length > 0) {
-          addRecallReason(recalled, secondHop.nodeId, "business-signal-hop");
-        }
+  while (queue.length > 0) {
+    const current = queue.shift()!;
+    if (current.depth >= RECALL_MAX_DEPTH) {
+      continue;
+    }
+
+    for (const neighbor of adjacency.get(current.nodeId) ?? []) {
+      const nextDepth = current.depth + 1;
+      if (nextDepth > RECALL_MAX_DEPTH) {
+        continue;
+      }
+
+      const neighborNode = nodeById.get(neighbor.nodeId);
+      if (nextDepth === 1) {
+        addRecallReason(recalled, neighbor.nodeId, "direct-neighbor");
+      } else if (neighborNode && hasBusinessSignals(neighborNode)) {
+        addRecallReason(recalled, neighbor.nodeId, "business-signal-reachable");
+      }
+
+      if (!visited.has(neighbor.nodeId)) {
+        visited.add(neighbor.nodeId);
+        queue.push({ nodeId: neighbor.nodeId, depth: nextDepth });
       }
     }
   }
@@ -948,7 +968,7 @@ function buildProductContextFile(
     })),
   );
   const anchors = sortedItems
-    .filter(({ node }) => hasBusinessSignals(node) && node.type !== "file")
+    .filter(({ node }) => hasBusinessSignals(node))
     .sort((a, b) => compareAnchorNodes(a.node, b.node))
     .flatMap(({ node }) => buildContextAnchors(node))
     .slice(0, maxAnchors);

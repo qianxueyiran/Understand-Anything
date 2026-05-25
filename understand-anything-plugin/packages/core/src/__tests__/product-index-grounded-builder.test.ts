@@ -135,6 +135,153 @@ describe("grounded product index builder", () => {
     expect(packs[0].candidateFiles.map((file) => file.filePath)).not.toContain("common/BaseReceiver.java");
   });
 
+  it("builds file-level anchors for file-only graphs", () => {
+    const bootFile = node({
+      id: "file:app/BootBroadcastReceiver.java",
+      type: "file",
+      name: "BootBroadcastReceiver.java",
+      filePath: "app/BootBroadcastReceiver.java",
+      summary: "Boot receiver source file.",
+      businessSignals: [
+        { type: "entry", text: "开机广播接收入口" },
+        { type: "behavior", text: "接收开机广播并启动后续处理" },
+      ],
+    });
+    const homeTaskFile = node({
+      id: "file:app/HomeBootTask.java",
+      type: "file",
+      name: "HomeBootTask.java",
+      filePath: "app/HomeBootTask.java",
+      businessSignals: [{ type: "data", text: "开机后首页数据请求" }],
+    });
+    const kg = graph(
+      [bootFile, homeTaskFile],
+      [edge({ source: bootFile.id, target: homeTaskFile.id, type: "depends_on" })],
+    );
+    const topic = normaliseProductTopics([
+      {
+        id: "candidate:file:app/BootBroadcastReceiver.java",
+        rootNodeId: bootFile.id,
+        name: "BootBroadcastReceiver.java",
+        entryKind: "receiver",
+        filePath: bootFile.filePath,
+        businessSignals: bootFile.businessSignals ?? [],
+        neighborNodeIds: [homeTaskFile.id],
+        domainRefs: [],
+      },
+    ])[0];
+
+    const packs = buildTopicContextPacks(kg, [topic], { maxFilesPerTopic: 8, maxAnchorsPerFile: 4 });
+    const bootPack = packs[0].candidateFiles.find((file) => file.filePath === bootFile.filePath);
+
+    expect(bootPack?.anchors.map((anchor) => anchor.anchorId)).toEqual([
+      "anchor:file:app/BootBroadcastReceiver.java:0",
+      "anchor:file:app/BootBroadcastReceiver.java:1",
+    ]);
+    expect(bootPack?.anchors[0]?.nodeId).toBe(bootFile.id);
+    expect(bootPack?.anchors[0]?.lineRange).toBeUndefined();
+
+    const evidenceRef = bootPack!.anchors[0].anchorId;
+    const index = finalizeGroundedProductIndex({
+      graph: kg,
+      topics: [topic],
+      contextPacks: packs,
+      extractions: [
+        {
+          topicId: topic.id,
+          usedFiles: [{ fileId: `file:${bootFile.filePath}`, reason: "承载开机广播接收" }],
+          ignoredFiles: [],
+          facts: [
+            {
+              type: "behavior",
+              text: "应用接收开机广播后会启动后续首页初始化处理。",
+              conditions: ["系统发出开机广播"],
+              evidenceRefs: [evidenceRef],
+              confidence: "confirmed",
+            },
+          ],
+        },
+      ],
+      options: { platform: "android", analyzedAt: "2026-05-19T00:00:00.000Z" },
+    });
+
+    expect(index.topics).toHaveLength(1);
+    expect(index.evidence).toHaveLength(1);
+    expect(index.evidence[0].nodeId).toBe(bootFile.id);
+    expect(validateProductIndex(index).success).toBe(true);
+  });
+
+  it("recalls business-signal nodes beyond 2 hops up to depth 6", () => {
+    const hopA = node({
+      id: "file:app/HopA.java",
+      type: "file",
+      name: "HopA.java",
+      filePath: "app/HopA.java",
+      summary: "Entry file.",
+    });
+    const hopB = node({
+      id: "file:app/HopB.java",
+      type: "file",
+      name: "HopB.java",
+      filePath: "app/HopB.java",
+      summary: "Intermediate file without signals.",
+    });
+    const hopC = node({
+      id: "file:app/HopC.java",
+      type: "file",
+      name: "HopC.java",
+      filePath: "app/HopC.java",
+      summary: "Intermediate file without signals.",
+    });
+    const hopD = node({
+      id: "file:app/HopD.java",
+      type: "file",
+      name: "HopD.java",
+      filePath: "app/HopD.java",
+      businessSignals: [{ type: "data", text: "深度链路业务信号" }],
+    });
+    const hopE = node({
+      id: "file:app/HopE.java",
+      type: "file",
+      name: "HopE.java",
+      filePath: "app/HopE.java",
+      summary: "Too deep without signal.",
+    });
+    const kg = graph(
+      [hopA, hopB, hopC, hopD, hopE],
+      [
+        edge({ source: hopA.id, target: hopB.id, type: "imports" }),
+        edge({ source: hopB.id, target: hopC.id, type: "depends_on" }),
+        edge({ source: hopC.id, target: hopD.id, type: "depends_on" }),
+        edge({ source: hopD.id, target: hopE.id, type: "imports" }),
+      ],
+    );
+    const topic = normaliseProductTopics([
+      {
+        id: "candidate:HopA",
+        rootNodeId: hopA.id,
+        name: "HopA",
+        entryKind: "activity",
+        filePath: hopA.filePath,
+        businessSignals: [],
+        neighborNodeIds: [hopB.id],
+        domainRefs: [],
+      },
+    ])[0];
+
+    const packs = buildTopicContextPacks(kg, [topic], { maxFilesPerTopic: 8, maxAnchorsPerFile: 4 });
+    const filePaths = packs[0].candidateFiles.map((file) => file.filePath);
+
+    expect(filePaths).toContain("app/HopA.java");
+    expect(filePaths).toContain("app/HopB.java");
+    expect(filePaths).not.toContain("app/HopC.java");
+    expect(filePaths).toContain("app/HopD.java");
+    expect(filePaths).not.toContain("app/HopE.java");
+    expect(
+      packs[0].candidateFiles.find((file) => file.filePath === "app/HopD.java")?.structuralReasons,
+    ).toContain("business-signal-reachable");
+  });
+
   it("generates stable unique anchor ids for multiple signals on one node", () => {
     const multiSignalNode = node({
       id: "function:PlaybackRules.java:applyRules",

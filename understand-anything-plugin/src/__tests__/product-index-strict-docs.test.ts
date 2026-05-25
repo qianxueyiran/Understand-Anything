@@ -86,6 +86,8 @@ describe("understand-product strict docs", () => {
     expect(normalizer).not.toContain("`element`");
     expect(normalizer).toContain("不能抽取 facts");
     expect(normalizer).toContain("不能全项目搜索源码");
+    expect(normalizer).toContain("file:app/BootBroadcastReceiver.java");
+    expect(normalizer).not.toContain("candidate:class:BootBroadcastReceiver");
   });
 
   it("requires fact analyzer source reads and bounded evidence refs", () => {
@@ -99,5 +101,6 @@ describe("understand-product strict docs", () => {
     expect(analyzer).toContain("anchors[].signalType");
     expect(analyzer).toContain("禁止");
     expect(analyzer).not.toContain("`target`、`entry`");
+    expect(analyzer).toContain("anchor:file:app/BootBroadcastReceiver.java:0");
   });
 });

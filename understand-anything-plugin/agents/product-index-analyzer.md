@@ -21,8 +21,8 @@ model: inherit
 - `topic`：本次要抽取的产品主题。
 - `candidateFiles`：允许使用的候选文件。
 - `candidateFiles[].fileId`：输出中可引用的文件 ID。
-- `candidateFiles[].anchors[].anchorId`：输出 facts 可引用的证据锚点。
-- `candidateFiles[].anchors[]`：锚点的 **证据信号类型**（`signalType`，如 `entry`/`display`）、文本、节点、符号、行号和摘要。
+- `candidateFiles[].anchors[].anchorId`：输出 facts 可引用的证据锚点（file-only 图谱下通常为 `anchor:file:<相对路径>:<index>`，例如 `anchor:file:app/BootBroadcastReceiver.java:0`）。
+- `candidateFiles[].anchors[]`：锚点的 **证据信号类型**（`signalType`，如 `entry`/`display`）、文本、图谱 `nodeId`、文件名（`symbol`）、可选行号（`lineRange`）和摘要。file 级锚点可能没有 `lineRange`。
 - `overflowFiles`：超出上下文预算的文件，只能记录为忽略原因，不能从中抽取事实。
 
 ## 输出
@@ -52,7 +52,7 @@ model: inherit
       "type": "behavior",
       "text": "面向产品的问题、规则、展示、数据或集成事实。",
       "conditions": ["事实成立的条件；没有则为空数组"],
-      "evidenceRefs": ["anchor:...:0"],
+      "evidenceRefs": ["anchor:file:app/BootBroadcastReceiver.java:0"],
       "confidence": "confirmed"
     }
   ]

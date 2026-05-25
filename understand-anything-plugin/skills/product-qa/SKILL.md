@@ -7,16 +7,29 @@ argument-hint: [问题]
 # /product-qa
 
  - **适合回答本项目的产品细节类问题**，如：“首页的加载流程是什么样的”
- - **不适合回答概念类问题**，如：“首页的加载流程是什么样的”
+ - **不适合回答概念类问题**，如：“什么是银河”
+ - **不适合回答与本项目无关的问题**，如：“竞品是怎么实现xxx功能的?”
+ - **不适合技术原理问题**，如：“Kotlin 协程怎么用”
 
 ## 产物定位
 
-| 产物 | 定位 | 使用时机 |
-|---|---|---|
-| `.understand-anything/product-index.json` | 产品知识索引。包含产品 Topic、Fact、Evidence、别名、置信度，以及可回溯的证据。 | 用户询问产品行为、功能入口、展示条件、业务规则、用户可见状态、后台能力、SDK 回调、Push、同步、投屏、下载、埋点或集成行为时优先使用。 |
-| `.understand-anything/knowledge-graph.json` | 结构代码图谱。包含文件、符号、摘要、分层和关系。 | 需要验证 product-index 的 Evidence、把 `nodeId` 解析到源文件、顺着相邻关系补查，或 product-index 没有有效命中时兜底使用。 |
+先读取 `.understand-anything/knowledge-graph.json` 与 `.understand-anything/product-index.json` 的顶层 `kind`，判断当前是**非分片**还是**分片**项目，再按下列方式消费产物。不要把 manifest 当作完整内容文件搜索。
 
-在本Skill中，不要生成或更新这些产物。如果某个产物缺失，继续使用可用产物；只有当缺失会影响结论置信度时，才在回答中说明限制。
+| 根文件 | 非分片 | 分片 |
+|---|---|---|
+| `knowledge-graph.json` | 完整 code graph（通常无 `kind`，或不是 `codebase-sharded`） | `kind: codebase-sharded` manifest |
+| `product-index.json` | `kind: product-index` 完整索引 | `kind: product-sharded` manifest |
+
+| 产物 | 定位 | 使用时机 | 使用方式 |
+|---|---|---|---|
+| `.understand-anything/product-index.json` | 产品知识索引入口：Topic、Fact、Evidence、别名、置信度与可回溯证据。 | 用户问产品行为、入口、展示条件、业务规则、集成、埋点等时**优先**使用。 | **非分片：** 直接在本文件内搜索 Topic / Fact / Evidence；验证证据时在同一文件的 `evidence[]` 中按 `evidenceIds` 解析。**分片：** 只读 manifest（`shards[]`、`source`）；用关键词在 `product-shards/*.json` 中定位候选 shard，再读取命中的 `product-shards/<id>.json` 做 Topic / Fact / Evidence 检索；不要对 manifest 做全文 Topic 搜索。 |
+| `.understand-anything/product-shards/<id>.json` | 单个 code shard 对应的产品索引正文（分片专用）。 | 分片项目命中某产品区域后，在该 shard 内读取完整 Topic / Fact / Evidence。 | **非分片：** 不存在，忽略。**分片：** 读取 manifest 中 `shards[].path` 指向的文件；在同一 shard 内用 `evidenceIds` 解析 `evidence[]`；需要追溯源码或结构关系时，按 manifest 条目的 `sourceCodeShard`（及可选 `sourceDomainShard`）跳转到对应 code / domain shard。 |
+| `.understand-anything/knowledge-graph.json` | 结构 code graph 入口：file 级节点、摘要、`businessSignals`、文件间关系。 | 验证 product Evidence、将 `nodeId` 解析为 `filePath`、沿边补查关联文件，或 product-index 无命中时兜底。 | **非分片：** 直接在本文件内搜索 `nodeId`、`filePath`、summary、tags、businessSignals；沿 `imports` / `depends_on` / `tested_by` 等边做 1-hop 扩展。**分片：** 只读 manifest 的 `shards[]` 与项目元信息；在 `.understand-anything/shards/` 下按 `nodeId` 或关键词搜索并读取命中的 `shards/<id>.json`； |
+| `.understand-anything/shards/<id>.json` | 单个 code shard 的结构图正文（分片专用）。 | 分片项目验证 Evidence、补查文件关系、或兜底搜索代码上下文。 | **非分片：** 不存在，忽略。**分片：** 读取与当前 product shard 同 id 的 code shard（见 `product-index.json` manifest 中 `sourceCodeShard`）；在该文件内定位 `nodeId`（多为 `file:<相对路径>`）并读取 `filePath`、邻接边与 `businessSignals`。 |
+
+**分片联动约定：** 处理某个 product shard 时，优先使用 manifest 上声明的 `sourceCodeShard` 做证据验证；若有 `sourceDomainShard`，再读同名 domain shard。除非用户要求全局概览，不要一次性加载所有 shard 全文。
+
+在本 Skill 中，不要生成或更新这些产物。如果某个产物缺失，继续使用可用产物；只有当缺失会影响结论置信度时，才在回答中说明限制。
 
 ## 产品问答流程
 
@@ -36,7 +49,7 @@ argument-hint: [问题]
 
 #### 2.1 检查 `.understand-anything/product-index.json`。
 
-- 如果不存在，进入第 7 步兜底路径。
+- 如果不存在，进入第 4 步兜底路径。
 - 如果 `kind` 是 `product-index`，直接检索。
 - 如果 `kind` 是 `product-sharded`，把它当作 manifest。先读取 manifest 中的 shard 列表，再用第 1 步提取的关键词对 `product-shards/*.json` 做轻量搜索来定位候选 shard。
 
@@ -55,6 +68,7 @@ argument-hint: [问题]
 
 - 读取它的名称、别名、摘要、状态、`facts`、`entryEvidenceIds`、`evidenceIds` 和 `domainRefs`。
 - 读取该 Topic 下的 `facts`。
+- 通过 fact 的 `evidenceIds` 在同一 product-index 文件（或同一 `product-shards/<id>.json` shard）的 `evidence[]` 中解析对应的 Evidence 对象。
 - 判断 Topic 加 Facts 是否能命中用户的具体问题。
 
 命中 Fact 时：
@@ -71,12 +85,14 @@ argument-hint: [问题]
 
 ### 3. 用源证据验证
 
-如果 product-index 有可用命中，用最小必要源文件读取来验证答案。
+如果 product-index 有可用命中，用最小必要源文件读取来验证答案。验证阶段可以读取路径和源码；最终回答仍遵守下文「回答风格」，不要向用户暴露文件路径、行号或图谱 ID。
 
-- 优先读取 Evidence 的 `filePath`。
-- 如果 Evidence 只有 `nodeId`，先在 `knowledge-graph.json` 中定位该节点，再解析到 `filePath`。
-- 如果有行范围，优先读取窄范围；否则读取对应源文件。
-- 必要时，可以读取 imports、calls、contains 边，或明显产品配置关系指向的关联文件。
+- **优先使用 Evidence 的 `filePath`** 读取源文件。
+- 若缺少 `filePath`、仅有 `nodeId`，再在 knowledge graph 中定位节点并解析 `filePath`：
+  - 若 `knowledge-graph.json` 的 `kind` 为 `codebase-sharded`，在 `.understand-anything/shards/` 中搜索该 `nodeId`；不要只在 manifest 里找节点。
+  - 当前知识图谱为 file-only：`nodeId` 通常为 `file:<相对路径>`。
+- 若 Evidence 有 `lineRange`，优先读取窄范围；否则读取整个源文件
+- 需要扩展关联文件时，沿 `imports`、`depends_on`、`tested_by` 等边查找，或读取明显产品配置关系指向的文件；
 - 一旦足以支撑产品答案，就停止。不要把产品问答变成全量代码审计。
 
 ### 4. 兜底使用 Knowledge Graph

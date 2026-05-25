@@ -19,7 +19,7 @@ model: inherit
 该文件是 JSON 数组。每个 candidate 包含：
 
 - `id`：候选 ID。
-- `rootNodeId`：候选根节点。
+- `rootNodeId`：候选根节点（file-only 知识图谱下为 `file:<相对路径>`，例如 `file:app/BootBroadcastReceiver.java`）。
 - `name`：代码侧名称，不能直接当成最终 topic name。
 - `entryKind`：入口类型。
 - `filePath`：候选直接相关源码路径。
@@ -45,21 +45,21 @@ model: inherit
       "name": "开机启动处理",
       "summary": "系统开机广播触发应用初始化和首页数据准备。",
       "kind": "capability",
-      "sourceCandidateIds": ["candidate:class:BootBroadcastReceiver"],
-      "rootNodeIds": ["class:BootBroadcastReceiver"],
+      "sourceCandidateIds": ["candidate:file:app/BootBroadcastReceiver.java"],
+      "rootNodeIds": ["file:app/BootBroadcastReceiver.java"],
       "domainRefs": [],
       "confidence": "confirmed"
     }
   ],
   "discardedCandidates": [
     {
-      "candidateId": "candidate:class:BaseReceiver",
-      "reason": "基础广播类，不表达具体产品业务。"
+      "candidateId": "candidate:file:common/BaseReceiver.java",
+      "reason": "基础广播基类文件，不表达具体产品业务。"
     }
   ],
   "sourceReads": [
     {
-      "candidateId": "candidate:class:BootBroadcastReceiver",
+      "candidateId": "candidate:file:app/BootBroadcastReceiver.java",
       "filePath": "app/BootBroadcastReceiver.java",
       "reason": "确认开机广播入口是否表达具体产品行为。"
     }
@@ -80,7 +80,7 @@ model: inherit
 - `data`: 独立的数据处理机制，如Pingback机制、播放记录数据同步机制
 - `process`: 独立的业务流程，如启动流程、起播流程、登录流程
 5. `sourceCandidateIds` 只能引用输入中已有 candidate。
-6. `rootNodeIds` 只能来自输入 candidate 的 `rootNodeId` 或其直接相关节点。
+6. `rootNodeIds` 只能来自输入 candidate 的 `rootNodeId` 或其 `neighborNodeIds` 中已有的图谱节点 ID。当前知识图谱为 **file-only**：优先使用 `file:<相对路径>`，不要输出 `class:`、`function:` 等符号节点 ID。
 7. 本阶段不能抽取 facts，不能选择 `evidenceRefs`，不能生成 evidence。
 8. 默认使用 candidate 内已有信息；如果信息不足，可以读取 candidate 直接相关的 `filePath`。
 9. 不能全项目搜索源码，不能读取与 candidate 无关的文件。
