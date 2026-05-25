@@ -84,4 +84,15 @@ describe("onboard-builder", () => {
     const guide = buildOnboardingGuide(noTour);
     expect(guide).toContain("# test-project");
   });
+
+  it("handles graphs with omitted layers and tour", () => {
+    const slimGraph = structuredClone(sampleGraph);
+    delete slimGraph.layers;
+    delete slimGraph.tour;
+
+    const guide = buildOnboardingGuide(slimGraph);
+    expect(guide).toContain("# test-project");
+    expect(guide).not.toContain("## Architecture");
+    expect(guide).not.toContain("## Getting Started");
+  });
 });

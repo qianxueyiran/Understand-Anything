@@ -1032,6 +1032,24 @@ class MergeIntegrationTests(unittest.TestCase):
 
         self.assertIsNone(args.intermediate_dir)
         self.assertIsNone(args.output)
+        self.assertFalse(args.preserve_external)
+
+    def test_cli_accepts_preserve_external_flag(self) -> None:
+        args = mbg.parse_args(["/tmp/project", "--preserve-external"])
+        self.assertTrue(args.preserve_external)
+
+    def test_cli_accepts_allow_external_edges_alias(self) -> None:
+        args = mbg.parse_args(["/tmp/project", "--allow-external-edges"])
+        self.assertTrue(args.preserve_external)
+
+    def test_resolve_preserve_external_cli_overrides_non_shard_output(self) -> None:
+        output = Path("/tmp/project/.understand-anything/intermediate/assembled-graph.json")
+        self.assertTrue(
+            mbg.resolve_preserve_external(cli_flag=True, output_path=output),
+        )
+        self.assertFalse(
+            mbg.resolve_preserve_external(cli_flag=False, output_path=output),
+        )
 
     def test_linker_runs_during_merge(self) -> None:
         batch = {

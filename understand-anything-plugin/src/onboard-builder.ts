@@ -5,7 +5,9 @@ import type { KnowledgeGraph } from "@understand-anything/core";
  * Output is standalone markdown suitable for a README, wiki, or docs.
  */
 export function buildOnboardingGuide(graph: KnowledgeGraph): string {
-  const { project, nodes, edges, layers, tour } = graph;
+  const { project, nodes, edges } = graph;
+  const layers = graph.layers ?? [];
+  const tour = graph.tour ?? [];
   const lines: string[] = [];
 
   // --- Project Overview ---

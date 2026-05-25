@@ -265,5 +265,21 @@ describe("tour-generator", () => {
       // With 4 code nodes and batches of 3, expect 2 code steps
       expect(codeSteps.length).toBe(2);
     });
+
+    it("handles graph with omitted layers", () => {
+      const slimGraph = structuredClone(sampleGraph);
+      delete slimGraph.layers;
+
+      const tour = generateHeuristicTour(slimGraph);
+      expect(tour.length).toBeGreaterThan(0);
+    });
+  });
+
+  it("buildTourGenerationPrompt handles omitted layers", () => {
+    const slimGraph = structuredClone(sampleGraph);
+    delete slimGraph.layers;
+
+    const prompt = buildTourGenerationPrompt(slimGraph);
+    expect(prompt).toContain("(no layers detected)");
   });
 });

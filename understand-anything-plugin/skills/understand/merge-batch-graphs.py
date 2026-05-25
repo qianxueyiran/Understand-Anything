@@ -9,8 +9,11 @@ Called at the end of Phase 2 of /understand. Phase 3 (ASSEMBLE REVIEW)
 then reviews the output for semantic issues the script cannot catch.
 
 Usage:
-    python merge-batch-graphs.py <project-root> [--output <path>]
+    python merge-batch-graphs.py <project-root> [--preserve-external] [--output <path>]
     python merge-batch-graphs.py <project-root> --import-recovery-only --graph <path>
+
+Scoped shard builds pass --preserve-external so cross-shard imports edges are kept
+while writing the default intermediate/assembled-graph.json staging file.
 
 Input:
     <project-root>/.understand-anything/intermediate/batch-*.json
@@ -763,6 +766,11 @@ def is_shard_merge_output(path: Path) -> bool:
     )
 
 
+def resolve_preserve_external(*, cli_flag: bool, output_path: Path) -> bool:
+    """Enable cross-shard imports retention from CLI or shard/candidate output paths."""
+    return cli_flag or is_shard_merge_output(output_path)
+
+
 # ── Main merge + normalize ────────────────────────────────────────────────
 
 def strip_symbol_graph(
@@ -1185,15 +1193,32 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         default=None,
         help="Write the assembled graph to this path instead of intermediate/assembled-graph.json.",
     )
+    parser.add_argument(
+        "--preserve-external",
+        "--allow-external-edges",
+        action="store_true",
+        help=(
+            "Keep imports edges whose target is outside the merged node set "
+            "(scoped shard staging and sharded incremental candidates)."
+        ),
+    )
     return parser.parse_args(argv)
 
 
-def run_import_recovery_only(project_root: Path, graph_path: Path) -> None:
+def run_import_recovery_only(
+    project_root: Path,
+    graph_path: Path,
+    *,
+    preserve_external_cli: bool = False,
+) -> None:
     if not graph_path.is_file():
         print(f"Error: graph file does not exist: {graph_path}", file=sys.stderr)
         sys.exit(1)
 
-    preserve_external = is_shard_merge_output(graph_path)
+    preserve_external = resolve_preserve_external(
+        cli_flag=preserve_external_cli,
+        output_path=graph_path,
+    )
     assembled = json.loads(graph_path.read_text(encoding="utf-8"))
     scan_result_path = project_root / ".understand-anything" / "intermediate" / "scan-result.json"
     recovered, recovery_report = recover_imports_from_scan(
@@ -1222,7 +1247,11 @@ def main() -> None:
         if not args.graph:
             print("Error: --import-recovery-only requires --graph <path>", file=sys.stderr)
             sys.exit(1)
-        run_import_recovery_only(project_root, Path(args.graph).resolve())
+        run_import_recovery_only(
+            project_root,
+            Path(args.graph).resolve(),
+            preserve_external_cli=args.preserve_external,
+        )
         return
 
     intermediate_dir = (
@@ -1236,7 +1265,10 @@ def main() -> None:
         sys.exit(1)
 
     output_path = Path(args.output).resolve() if args.output else intermediate_dir / "assembled-graph.json"
-    preserve_external = is_shard_merge_output(output_path)
+    preserve_external = resolve_preserve_external(
+        cli_flag=args.preserve_external,
+        output_path=output_path,
+    )
 
     # Discover batch files, sorted by numeric index (not lexicographic)
     batch_files = sorted(

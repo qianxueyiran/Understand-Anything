@@ -2,10 +2,7 @@ import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { FingerprintStore } from "./fingerprint.js";
-import {
-  classifyChangedFiles,
-  pruneGraphForChangedFiles as pruneIncrementalGraphForChangedFiles,
-} from "./incremental-update.js";
+import { classifyChangedFiles } from "./incremental-update.js";
 import type { PluginRegistry } from "./plugins/registry.js";
 import type { DomainShardedManifest, ProductShardedManifest } from "./sharded-manifest.js";
 import type { KnowledgeGraph } from "./types.js";
@@ -405,10 +402,3 @@ export function classifyAffectedShardChanges(
   };
 }
 
-export function pruneGraphForChangedFiles(
-  graph: KnowledgeGraph,
-  structuralFiles: string[],
-  deletedFiles: string[],
-): KnowledgeGraph {
-  return pruneIncrementalGraphForChangedFiles(graph, structuralFiles, deletedFiles);
-}

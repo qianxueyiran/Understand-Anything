@@ -72,6 +72,15 @@ describe("diff-analyzer", () => {
       expect(ctx.affectedNodes).toHaveLength(0);
     });
 
+    it("handles graphs with omitted layers", () => {
+      const slimGraph = structuredClone(sampleGraph);
+      delete slimGraph.layers;
+
+      const ctx = buildDiffContext(slimGraph, ["src/service.ts"]);
+      expect(ctx.affectedLayers).toEqual([]);
+      expect(ctx.changedNodes).toHaveLength(1);
+    });
+
     it("de-duplicates affected nodes (not in changed set)", () => {
       const ctx = buildDiffContext(sampleGraph, ["src/service.ts"]);
       const changedIds = new Set(ctx.changedNodes.map((n) => n.id));

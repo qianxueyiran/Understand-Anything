@@ -60,7 +60,14 @@ describe("explain-builder", () => {
     it("resolves file path only (no path:function notation)", () => {
       const graph: KnowledgeGraph = {
         version: "1.0.0",
-        project: { name: "demo", description: "", languages: [], frameworks: [] },
+        project: {
+          name: "demo",
+          description: "",
+          languages: [],
+          frameworks: [],
+          analyzedAt: "2026-03-14T00:00:00Z",
+          gitCommitHash: "abc123",
+        },
         nodes: [
           { id: "file:src/auth.ts", type: "file", name: "auth.ts", filePath: "src/auth.ts", summary: "Auth", tags: ["auth"], complexity: "moderate" },
         ],
@@ -76,6 +83,16 @@ describe("explain-builder", () => {
       const bySymbol = buildExplainContext(graph, "src/auth.ts:login");
       expect(bySymbol.targetNode?.id).toBe("file:src/auth.ts");
       expect(bySymbol.childNodes).toEqual([]);
+    });
+
+    it("handles graphs with omitted layers and tour", () => {
+      const slimGraph = structuredClone(sampleGraph);
+      delete slimGraph.layers;
+      delete slimGraph.tour;
+
+      const ctx = buildExplainContext(slimGraph, "src/auth.ts");
+      expect(ctx.targetNode?.id).toBe("file:src/auth.ts");
+      expect(ctx.layer).toBeNull();
     });
 
     it("builds context from sharded graphs without requiring a complete root graph", () => {

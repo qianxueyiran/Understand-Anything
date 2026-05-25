@@ -23,7 +23,8 @@ export function buildDiffContext(
   graph: KnowledgeGraph,
   changedFiles: string[],
 ): DiffContext {
-  const { nodes, edges, layers } = graph;
+  const { nodes, edges } = graph;
+  const layers = graph.layers ?? [];
 
   const changedNodeIds = new Set<string>();
   const unmappedFiles: string[] = [];

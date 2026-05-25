@@ -12,10 +12,10 @@ import {
   buildTransactionalCodeManifestUpdate,
   classifyAffectedShardChanges,
   hashArtifactFile,
-  pruneGraphForChangedFiles,
   saveShardedUpdatePlan,
   type CodebaseShardedManifest,
 } from "../sharded-update.js";
+import { pruneGraphForChangedFiles } from "../incremental-update.js";
 import type { DomainShardedManifest, ProductShardedManifest } from "../sharded-manifest.js";
 import type { FingerprintStore } from "../fingerprint.js";
 import type { PluginRegistry } from "../plugins/registry.js";

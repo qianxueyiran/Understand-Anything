@@ -63,7 +63,8 @@ export function buildChatContext(
   );
 
   // 4. Find layers containing any relevant node
-  const relevantLayers = graph.layers.filter((layer) =>
+  const layers = graph.layers ?? [];
+  const relevantLayers = layers.filter((layer) =>
     layer.nodeIds.some((id) => expandedIds.has(id)),
   );
 

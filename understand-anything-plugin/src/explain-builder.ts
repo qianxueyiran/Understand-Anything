@@ -23,7 +23,8 @@ export function buildExplainContext(
   graph: KnowledgeGraph,
   path: string,
 ): ExplainContext {
-  const { nodes, edges, layers } = graph;
+  const { nodes, edges } = graph;
+  const layers = graph.layers ?? [];
 
   let targetNode: GraphNode | null =
     nodes.find((n) => n.filePath === path || n.id === path) ?? null;
@@ -114,8 +115,8 @@ export function buildExplainContextFromGraphs(
     ...baseGraph,
     nodes: dedupeById(graphs.flatMap((graph) => graph.nodes)),
     edges: dedupeEdges(graphs.flatMap((graph) => graph.edges)),
-    layers: dedupeById(graphs.flatMap((graph) => graph.layers)),
-    tour: graphs.flatMap((graph) => graph.tour),
+    layers: dedupeById(graphs.flatMap((graph) => graph.layers ?? [])),
+    tour: graphs.flatMap((graph) => graph.tour ?? []),
   };
 
   return buildExplainContext(mergedGraph, path);

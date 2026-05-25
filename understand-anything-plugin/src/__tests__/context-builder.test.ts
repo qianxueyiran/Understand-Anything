@@ -231,4 +231,14 @@ describe("formatContextForPrompt", () => {
     expect(formatted).toContain("complex");
     expect(formatted).toContain("class");
   });
+
+  it("handles graphs with omitted layers and tour", () => {
+    const slimGraph = structuredClone(sampleGraph);
+    delete slimGraph.layers;
+    delete slimGraph.tour;
+
+    const ctx = buildChatContext(slimGraph, "authentication");
+    expect(ctx.relevantLayers).toEqual([]);
+    expect(ctx.relevantNodes.length).toBeGreaterThan(0);
+  });
 });
