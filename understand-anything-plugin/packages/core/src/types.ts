@@ -35,6 +35,19 @@ export interface DomainMeta {
   entryType?: "http" | "cli" | "event" | "cron" | "manual";
 }
 
+export type BusinessSignalType =
+  | "entry"
+  | "behavior"
+  | "rule"
+  | "display"
+  | "data"
+  | "integration";
+
+export interface BusinessSignal {
+  type: BusinessSignalType;
+  text: string;
+}
+
 // GraphNode with 21 types: 5 code + 8 non-code + 3 domain + 5 knowledge
 export interface GraphNode {
   id: string;
@@ -48,6 +61,7 @@ export interface GraphNode {
   languageNotes?: string;
   domainMeta?: DomainMeta;
   knowledgeMeta?: KnowledgeMeta;
+  businessSignals?: BusinessSignal[];
 }
 
 // GraphEdge with rich relationship modeling
@@ -94,8 +108,8 @@ export interface KnowledgeGraph {
   project: ProjectMeta;
   nodes: GraphNode[];
   edges: GraphEdge[];
-  layers: Layer[];
-  tour: TourStep[];
+  layers?: Layer[];
+  tour?: TourStep[];
 }
 
 // Theme configuration (for dashboard customization)

@@ -12,6 +12,9 @@
 - **Dependency Injection**: IoC pattern central to Spring; constructor, field, or method injection
 - **Checked vs Unchecked Exceptions**: Checked must be declared or caught; unchecked extend RuntimeException
 - **Optional**: Container for nullable values encouraging explicit handling over null checks
+- **Android Lifecycle Overrides**: `onCreate`, `onStart`, `onResume`, `onPause`, `onStop`, `onDestroy`, and callback/listener methods often define UI lifecycle behavior
+- **Android Annotations and DI**: `@Inject`, `@Module`, `@Provides`, `@Binds`, `@AndroidEntryPoint`, and `@Override` can reveal Hilt/Dagger wiring and framework contracts
+- **MVP Contracts**: `Contract.View`, `Contract.Presenter`, `BasePresenter`, `BaseView`, and presenter/view binding methods are Android MVP structure evidence
 
 ## Import Patterns
 
@@ -26,14 +29,24 @@
 - `pom.xml` — Maven project configuration and dependency management
 - `build.gradle` — Gradle build script (Groovy or Kotlin DSL)
 - `Application.java` — Spring Boot entry point with `@SpringBootApplication`
+- `*Application.java`, `*Activity.java`, `*Fragment.java` — Android application and UI lifecycle entry points
+- `*Presenter.java`, `*Contract.java`, `*ViewModel.java`, `*UseCase.java` — Android MVP/MVVM/Clean Architecture structure
+- `src/androidTest/java/` — Android instrumentation tests
 
 ## Common Frameworks
 
 - **Spring Boot** — Opinionated framework for production-ready Spring applications
+- **Android Framework / AndroidX** — Activity, Fragment, lifecycle, navigation, RecyclerView, Room, and other Android app building blocks
+- **Hilt / Dagger** — Annotation-driven dependency injection frameworks common in Android Java/Kotlin projects
+- **Retrofit / OkHttp / Room** — Common network and persistence stack
 - **Jakarta EE** — Enterprise Java standards (formerly Java EE) for server-side development
 - **Quarkus** — Cloud-native framework optimized for GraalVM and containers
 - **Micronaut** — Compile-time DI framework for microservices and serverless
 - **Hibernate** — ORM framework implementing JPA specification
+
+## Android Notes
+
+在 Android Java 项目中，`Activity` / `Fragment` 是 UI 入口和生命周期承载，`Presenter` / `Contract` / `View` 是 MVP 协作结构，`Repository` / `DataSource` / `DAO` 是数据访问结构。不要把这些技术角色直接当作业务域；业务含义需要结合页面名、Manifest、路由、资源文案、接口路径和用户动作判断。
 
 ## Example Language Notes
 

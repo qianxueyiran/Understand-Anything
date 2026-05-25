@@ -12,19 +12,18 @@ Analyze the current code changes against the knowledge graph at `.understand-any
 The knowledge graph JSON has this structure:
 - `project` — {name, description, languages, frameworks, analyzedAt, gitCommitHash}
 - `nodes[]` — each has {id, type, name, filePath, summary, tags[], complexity, languageNotes?}
-  - Node types: file, function, class, module, concept
-  - IDs: `file:path`, `function:path:name`, `class:path:name`
+  - Primary types: `file`, `config`, `document`, `service`, and other file-level node types
+  - IDs: `file:<relative-path>` (code files are file-level only in new graphs)
 - `edges[]` — each has {source, target, type, direction, weight}
-  - Key types: imports, contains, calls, depends_on
-- `layers[]` — each has {id, name, description, nodeIds[]}
-- `tour[]` — each has {order, title, description, nodeIds[]}
+  - Key types: `imports`, `depends_on`, `tested_by`
+- `layers[]` / `tour[]` — optional; may be absent in current pipeline output
 
 ## How to Read Efficiently
 
 1. Use Grep to search within the JSON for relevant entries BEFORE reading the full file
 2. Only read sections you need — don't dump the entire graph into context
 3. Node names and summaries are the most useful fields for understanding
-4. Edges tell you how components connect — follow imports and calls for dependency chains
+4. Edges tell you how components connect — follow `imports` and `depends_on` for dependency chains
 
 ## Instructions
 
@@ -39,7 +38,7 @@ The knowledge graph JSON has this structure:
 
 4. **Find nodes for changed files** — for each changed file path, use Grep to search the knowledge graph for:
    - Nodes with matching `"filePath"` values (e.g., `grep "changed/file/path"`)
-   - This finds file nodes AND function/class nodes defined in those files
+   - This finds file nodes for the changed paths (function/class symbol nodes are no longer emitted)
    - Note the `id` values of all matched nodes
 
 5. **Find connected edges (1-hop)** — for each matched node ID, Grep for that ID in the edges to find:

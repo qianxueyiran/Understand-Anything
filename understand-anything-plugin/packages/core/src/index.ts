@@ -1,4 +1,7 @@
 export * from "./types.js";
+export * from "./incremental-update.js";
+export * from "./sharded-manifest.js";
+export * from "./sharded-update.js";
 export * from "./persistence/index.js";
 export {
   KnowledgeGraphSchema,
@@ -100,6 +103,47 @@ export {
   classifyUpdate,
   type UpdateDecision,
 } from "./change-classifier.js";
+export {
+  ProductIndexSchema,
+  ProductSignalSchema,
+  validateProductIndex,
+  searchProductIndex,
+  type ProductIndex,
+  type ProductTopic,
+  type ProductFact,
+  type ProductEvidence,
+  type ProductSignal,
+  type ProductIndexSearchResult,
+  type ProductIndexValidationResult,
+} from "./product-index.js";
+export {
+  enumerateProductEntrySeeds,
+  buildProductBoundaryCandidates,
+  buildProductSignals,
+  buildDeterministicProductIndex,
+  buildTopicContextPacks,
+  normaliseProductTopics,
+  type NormalizedProductTopic,
+  type ProductBoundaryCandidate,
+  type ProductBoundaryCandidateOptions,
+  type ProductContextAnchor,
+  type ProductContextFile,
+  type ProductEntrySeed,
+  type ProductProfileOptions,
+  type TopicContextPack,
+  type TopicContextPackOptions,
+} from "./product-index-builder.js";
+export {
+  ProductTopicNormalizationSchema,
+  PipelineWarningSeveritySchema,
+  applyTopicNormalization,
+  buildProductIndexTrace,
+  validateProductExtractions,
+  validateTopicNormalization,
+  type ProductIndexTrace,
+  type ProductPipelineWarning,
+  type ProductTopicNormalization,
+} from "./product-index-pipeline.js";
 // Non-code parsers
 export {
   MarkdownParser,

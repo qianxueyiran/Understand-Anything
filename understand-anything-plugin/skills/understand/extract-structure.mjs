@@ -19,6 +19,8 @@
 import { createRequire } from 'node:module';
 import { dirname, resolve, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+
+const __filename = fileURLToPath(import.meta.url);
 import { readFileSync, writeFileSync } from 'node:fs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -303,8 +305,10 @@ export function buildResult(file, totalLines, nonEmptyLines, analysis, callGraph
 // Run only when executed directly as a CLI; importing the module (e.g. from
 // tests) must not trigger main().
 // ---------------------------------------------------------------------------
+// path.resolve handles symlinks / relative argv on macOS & Windows
 const isCli =
-  process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
+  process.argv[1] &&
+  resolve(process.argv[1]) === resolve(__filename);
 
 if (isCli) {
   try {

@@ -1,6 +1,11 @@
 import { useEffect, useState, useMemo, useCallback, lazy, Suspense } from "react";
+import {
+  validateProductIndex,
+  type ProductIndex,
+} from "@understand-anything/core/product-index";
 import { validateGraph } from "@understand-anything/core/schema";
 import type { GraphIssue } from "@understand-anything/core/schema";
+import type { KnowledgeGraph } from "@understand-anything/core/types";
 import { useDashboardStore } from "./store";
 import GraphView from "./components/GraphView";
 import DomainGraphView from "./components/DomainGraphView";
@@ -13,6 +18,7 @@ import FilterPanel from "./components/FilterPanel";
 import ExportMenu from "./components/ExportMenu";
 import PersonaSelector from "./components/PersonaSelector";
 import ProjectOverview from "./components/ProjectOverview";
+import ProductIndexPanel from "./components/ProductIndexPanel";
 import FileExplorer from "./components/FileExplorer";
 import WarningBanner from "./components/WarningBanner";
 import TokenGate from "./components/TokenGate";
@@ -46,6 +52,7 @@ function dataUrl(fileName: string, token: string | null): string {
       "meta.json": import.meta.env.VITE_META_URL,
       "diff-overlay.json": import.meta.env.VITE_DIFF_OVERLAY_URL,
       "config.json": import.meta.env.VITE_CONFIG_URL,
+      "product-index.json": import.meta.env.VITE_PRODUCT_INDEX_URL,
     };
     const url = envMap[fileName];
     if (url) return url;
@@ -75,6 +82,28 @@ function resolveInitialToken(): string | null {
   return sessionStorage.getItem(SESSION_TOKEN_KEY);
 }
 
+function productIndexMatchesGraph(
+  productIndex: ProductIndex,
+  graph: KnowledgeGraph,
+): boolean {
+  const graphCommitHash = graph.project.gitCommitHash?.trim();
+  const productCommitHash =
+    productIndex.sources.knowledgeGraph.gitCommitHash?.trim() ??
+    productIndex.project.gitCommitHash?.trim();
+
+  if (graphCommitHash) {
+    return productCommitHash === graphCommitHash;
+  }
+
+  const graphAnalyzedAt = graph.project.analyzedAt?.trim();
+  const productAnalyzedAt = productIndex.project.analyzedAt?.trim();
+  if (graphAnalyzedAt && productAnalyzedAt) {
+    return graphAnalyzedAt === productAnalyzedAt;
+  }
+
+  return true;
+}
+
 function App() {
   const [accessToken, setAccessToken] = useState<string | null>(resolveInitialToken);
 
@@ -97,7 +126,9 @@ function App() {
 }
 
 function Dashboard({ accessToken }: { accessToken: string }) {
+  const graph = useDashboardStore((s) => s.graph);
   const setGraph = useDashboardStore((s) => s.setGraph);
+  const setProductIndex = useDashboardStore((s) => s.setProductIndex);
   const setDomainGraph = useDashboardStore((s) => s.setDomainGraph);
   const setDiffOverlay = useDashboardStore((s) => s.setDiffOverlay);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -178,6 +209,54 @@ function Dashboard({ accessToken }: { accessToken: string }) {
   }, [setDiffOverlay]);
 
   useEffect(() => {
+    setProductIndex(null);
+    if (!graph) return;
+
+    const controller = new AbortController();
+    let cancelled = false;
+
+    fetch(dataUrl("product-index.json", accessToken), { signal: controller.signal })
+      .then((res) => {
+        if (!res.ok) {
+          if (!cancelled) setProductIndex(null);
+          return null;
+        }
+        return res.json();
+      })
+      .then((data: unknown) => {
+        if (cancelled || !data) return;
+        const result = validateProductIndex(data);
+        if (result.success) {
+          if (productIndexMatchesGraph(result.data, graph)) {
+            setProductIndex(result.data);
+          } else {
+            console.warn(
+              "[product-index] stale index ignored. Run /understand-product again.",
+            );
+            setProductIndex(null);
+          }
+        } else {
+          console.warn(`[product-index] validation failed: ${result.error}`);
+          setProductIndex(null);
+        }
+      })
+      .catch((err: unknown) => {
+        if (
+          cancelled ||
+          (err instanceof DOMException && err.name === "AbortError")
+        ) {
+          return;
+        }
+        setProductIndex(null);
+      });
+
+    return () => {
+      cancelled = true;
+      controller.abort();
+    };
+  }, [accessToken, graph, setProductIndex]);
+
+  useEffect(() => {
     fetch(dataUrl("domain-graph.json", accessToken))
       .then((res) => {
         if (!res.ok) return null;
@@ -229,10 +308,6 @@ function DashboardContent({
   const togglePathFinder = useDashboardStore((s) => s.togglePathFinder);
   const nodeTypeFilters = useDashboardStore((s) => s.nodeTypeFilters);
   const toggleNodeTypeFilter = useDashboardStore((s) => s.toggleNodeTypeFilter);
-  const detailLevel = useDashboardStore((s) => s.detailLevel);
-  const setDetailLevel = useDashboardStore((s) => s.setDetailLevel);
-  const showFunctionsInClassView = useDashboardStore((s) => s.showFunctionsInClassView);
-  const toggleShowFunctionsInClassView = useDashboardStore((s) => s.toggleShowFunctionsInClassView);
   const [showKeyboardHelp, setShowKeyboardHelp] = useState(false);
   const [sidebarTab, setSidebarTab] = useState<SidebarTab>("info");
   const viewMode = useDashboardStore((s) => s.viewMode);
@@ -381,7 +456,12 @@ function DashboardContent({
           <LearnPanel />
         </Suspense>
       )}
-      {!selectedNodeId && !isLearnMode && <ProjectOverview />}
+      {!selectedNodeId && !isLearnMode && (
+        <>
+          <ProductIndexPanel />
+          <ProjectOverview />
+        </>
+      )}
     </>
   );
 
@@ -470,52 +550,6 @@ function DashboardContent({
         <div className="flex-1 min-w-0 overflow-x-auto scrollbar-hide">
           <div className="flex items-center gap-4 w-max">
             <DiffToggle />
-            {/* Detail level: file view (architecture) / class view (code structure) */}
-            {!isKnowledgeGraph && viewMode !== "domain" && (
-              <>
-                <div className="w-px h-5 bg-border-subtle" />
-                <div className="flex items-center bg-elevated rounded-lg p-0.5">
-                  <button
-                    type="button"
-                    onClick={() => setDetailLevel("file")}
-                    title={t.detailLevel.filesTitle}
-                    className={`px-3 py-1 text-xs font-medium rounded-md transition-colors ${
-                      detailLevel === "file"
-                        ? "bg-accent/20 text-accent"
-                        : "text-text-muted hover:text-text-secondary"
-                    }`}
-                  >
-                    {t.detailLevel.files}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setDetailLevel("class")}
-                    title={t.detailLevel.classesTitle}
-                    className={`px-3 py-1 text-xs font-medium rounded-md transition-colors ${
-                      detailLevel === "class"
-                        ? "bg-accent/20 text-accent"
-                        : "text-text-muted hover:text-text-secondary"
-                    }`}
-                  >
-                    {t.detailLevel.classes}
-                  </button>
-                </div>
-                {detailLevel === "class" && (
-                  <button
-                    type="button"
-                    onClick={toggleShowFunctionsInClassView}
-                    title={t.detailLevel.fnTitle}
-                    className={`text-[10px] font-semibold uppercase tracking-wider px-2 py-1 rounded border transition-colors ${
-                      showFunctionsInClassView
-                        ? "border-amber-500/50 bg-amber-500/10 text-amber-400"
-                        : "border-border-medium bg-elevated text-text-muted hover:text-text-secondary"
-                    }`}
-                  >
-                    {t.detailLevel.fn}
-                  </button>
-                )}
-              </>
-            )}
             <div className="flex items-center gap-1">
               {(isKnowledgeGraph ? [
                 { key: "knowledge" as const, label: t.nodeTypeLabels.all, color: "var(--color-node-article)" },

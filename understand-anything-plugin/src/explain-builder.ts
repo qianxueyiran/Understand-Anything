@@ -16,31 +16,26 @@ export interface ExplainContext {
 }
 
 /**
- * Build a context for explaining a specific file or function.
- * Supports file paths ("src/auth.ts") and path:function ("src/auth.ts:login").
+ * Build a context for explaining a specific file.
+ * Supports file paths only (e.g. "src/auth.ts").
  */
 export function buildExplainContext(
   graph: KnowledgeGraph,
   path: string,
 ): ExplainContext {
-  const { nodes, edges, layers } = graph;
+  const { nodes, edges } = graph;
+  const layers = graph.layers ?? [];
 
-  let targetNode: GraphNode | null = null;
+  let targetNode: GraphNode | null =
+    nodes.find((n) => n.filePath === path || n.id === path) ?? null;
 
-  // Check for path:function format (e.g. "src/auth.ts:login")
-  const colonIdx = path.lastIndexOf(":");
-  if (colonIdx > 0 && !path.includes("://")) {
-    const filePath = path.slice(0, colonIdx);
-    const funcName = path.slice(colonIdx + 1);
-    targetNode =
-      nodes.find(
-        (n) => n.filePath === filePath && n.name === funcName,
-      ) ?? null;
-  }
-
-  // Fall back to file path match
+  // Legacy path:function notation falls back to the file node
   if (!targetNode) {
-    targetNode = nodes.find((n) => n.filePath === path) ?? null;
+    const colonIdx = path.lastIndexOf(":");
+    if (colonIdx > 0 && !path.includes("://")) {
+      const filePath = path.slice(0, colonIdx);
+      targetNode = nodes.find((n) => n.filePath === filePath) ?? null;
+    }
   }
 
   if (!targetNode) {
@@ -55,20 +50,9 @@ export function buildExplainContext(
     };
   }
 
-  // Find child nodes (contained by this node via "contains" edges)
-  const childNodes = nodes.filter((n) =>
-    edges.some(
-      (e) =>
-        e.source === targetNode!.id &&
-        e.target === n.id &&
-        e.type === "contains",
-    ),
-  );
+  const childNodes: GraphNode[] = [];
 
-  const allRelatedIds = new Set([
-    targetNode.id,
-    ...childNodes.map((n) => n.id),
-  ]);
+  const allRelatedIds = new Set([targetNode.id]);
 
   // Find connected nodes (1-hop neighbors, excluding children and self)
   const connectedIds = new Set<string>();
@@ -100,6 +84,42 @@ export function buildExplainContext(
     relevantEdges,
     layer,
   };
+}
+
+/**
+ * Build explain context from one or more already-selected graph shards.
+ *
+ * Consumers should locate candidate shard files first (for example with rg
+ * against `.understand-anything/shards/`) and pass only the relevant shards.
+ */
+export function buildExplainContextFromGraphs(
+  graphs: KnowledgeGraph[],
+  path: string,
+): ExplainContext {
+  const graphWithTarget = graphs.find((graph) => graphContainsTarget(graph, path));
+  const baseGraph = graphWithTarget ?? graphs[0];
+
+  if (!baseGraph) {
+    return {
+      projectName: "sharded graph",
+      path,
+      targetNode: null,
+      childNodes: [],
+      connectedNodes: [],
+      relevantEdges: [],
+      layer: null,
+    };
+  }
+
+  const mergedGraph: KnowledgeGraph = {
+    ...baseGraph,
+    nodes: dedupeById(graphs.flatMap((graph) => graph.nodes)),
+    edges: dedupeEdges(graphs.flatMap((graph) => graph.edges)),
+    layers: dedupeById(graphs.flatMap((graph) => graph.layers ?? [])),
+    tour: graphs.flatMap((graph) => graph.tour ?? []),
+  };
+
+  return buildExplainContext(mergedGraph, path);
 }
 
 /**
@@ -193,4 +213,33 @@ export function formatExplainPrompt(ctx: ExplainContext): string {
   lines.push("");
 
   return lines.join("\n");
+}
+
+function graphContainsTarget(graph: KnowledgeGraph, path: string): boolean {
+  if (graph.nodes.some((node) => node.filePath === path || node.id === path)) {
+    return true;
+  }
+
+  const colonIdx = path.lastIndexOf(":");
+  if (colonIdx > 0 && !path.includes("://")) {
+    const filePath = path.slice(0, colonIdx);
+    return graph.nodes.some((node) => node.filePath === filePath);
+  }
+
+  return false;
+}
+
+function dedupeById<T extends { id: string }>(items: T[]): T[] {
+  return [...new Map(items.map((item) => [item.id, item])).values()];
+}
+
+function dedupeEdges(edges: GraphEdge[]): GraphEdge[] {
+  return [
+    ...new Map(
+      edges.map((edge) => [
+        `${edge.source}\u0000${edge.target}\u0000${edge.type}`,
+        edge,
+      ]),
+    ).values(),
+  ];
 }

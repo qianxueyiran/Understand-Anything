@@ -9,7 +9,11 @@ Called at the end of Phase 2 of /understand. Phase 3 (ASSEMBLE REVIEW)
 then reviews the output for semantic issues the script cannot catch.
 
 Usage:
-    python merge-batch-graphs.py <project-root>
+    python merge-batch-graphs.py <project-root> [--preserve-external] [--output <path>]
+    python merge-batch-graphs.py <project-root> --import-recovery-only --graph <path>
+
+Scoped shard builds pass --preserve-external so cross-shard imports edges are kept
+while writing the default intermediate/assembled-graph.json staging file.
 
 Input:
     <project-root>/.understand-anything/intermediate/batch-*.json
@@ -18,6 +22,7 @@ Output:
     <project-root>/.understand-anything/intermediate/assembled-graph.json
 """
 
+import argparse
 import json
 import os
 import re
@@ -76,6 +81,12 @@ COMPLEXITY_MAP: dict[str, str] = {
 }
 
 VALID_COMPLEXITY = {"simple", "moderate", "complex"}
+
+BUSINESS_SIGNAL_TYPES = {"entry", "behavior", "rule", "display", "data", "integration"}
+BUSINESS_SIGNAL_CAPS = {"file": 8}
+
+SYMBOL_NODE_TYPES = frozenset({"function", "class"})
+SYMBOL_EDGE_TYPES = frozenset({"contains", "exports", "calls", "inherits", "implements"})
 
 
 # ── tested_by linker configuration ────────────────────────────────────────
@@ -232,6 +243,45 @@ def normalize_complexity(value: Any) -> tuple[str, str]:
             return "complex", "mapped"
     # None or other type — default but flag it
     return "moderate", "unknown"
+
+
+def normalize_business_signals(node: dict[str, Any]) -> tuple[list[dict[str, str]], int]:
+    raw = node.get("businessSignals")
+    if not isinstance(raw, list):
+        return [], 0
+
+    cap = BUSINESS_SIGNAL_CAPS.get(str(node.get("type", "")), 3)
+    normalized: list[dict[str, str]] = []
+    seen: set[tuple[str, str]] = set()
+    dropped = 0
+
+    for item in raw:
+        if not isinstance(item, dict):
+            dropped += 1
+            continue
+        signal_type = item.get("type")
+        text = item.get("text")
+        if (
+            not isinstance(signal_type, str)
+            or signal_type not in BUSINESS_SIGNAL_TYPES
+            or not isinstance(text, str)
+            or not text.strip()
+        ):
+            dropped += 1
+            continue
+        cleaned_text = text.strip()[:80]
+        key = (signal_type, cleaned_text)
+        if key in seen:
+            dropped += 1
+            continue
+        seen.add(key)
+        normalized.append({"type": signal_type, "text": cleaned_text})
+        if len(normalized) >= cap:
+            break
+
+    if len(raw) > len(normalized) + dropped:
+        dropped += len(raw) - len(normalized) - dropped
+    return normalized, dropped
 
 
 # ── Deterministic tested_by linker ────────────────────────────────────────
@@ -704,9 +754,54 @@ def link_tests(
     return added, dropped, tagged, swapped
 
 
+# ── Shard output detection ─────────────────────────────────────────────────
+
+def is_shard_merge_output(path: Path) -> bool:
+    normalized = str(path).replace("\\", "/")
+    if "/.understand-anything/shards/" in normalized:
+        return True
+    return (
+        "/intermediate/sharded/" in normalized
+        and normalized.endswith("candidate-shard.json")
+    )
+
+
+def resolve_preserve_external(*, cli_flag: bool, output_path: Path) -> bool:
+    """Enable cross-shard imports retention from CLI or shard/candidate output paths."""
+    return cli_flag or is_shard_merge_output(output_path)
+
+
 # ── Main merge + normalize ────────────────────────────────────────────────
 
-def merge_and_normalize(batches: list[dict[str, Any]]) -> tuple[dict[str, Any], list[str]]:
+def strip_symbol_graph(
+    nodes: list[dict[str, Any]],
+    edges: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], dict[str, int]]:
+    """Remove function/class nodes and edges that depend on symbol endpoints."""
+    symbol_ids = {
+        node["id"]
+        for node in nodes
+        if node.get("type") in SYMBOL_NODE_TYPES and isinstance(node.get("id"), str)
+    }
+    kept_nodes = [node for node in nodes if node.get("type") not in SYMBOL_NODE_TYPES]
+    kept_edges = [
+        edge
+        for edge in edges
+        if edge.get("type") not in SYMBOL_EDGE_TYPES
+        and edge.get("source") not in symbol_ids
+        and edge.get("target") not in symbol_ids
+    ]
+    stats = {
+        "nodes_removed": len(nodes) - len(kept_nodes),
+        "edges_removed": len(edges) - len(kept_edges),
+    }
+    return kept_nodes, kept_edges, stats
+
+
+def merge_and_normalize(
+    batches: list[dict[str, Any]],
+    preserve_external: bool = False,
+) -> tuple[dict[str, Any], list[str]]:
     """Merge batch results and normalize. Returns (assembled_graph, report_lines)."""
 
     # ── Pattern counters for "Fixed" report ──────────────────────────
@@ -766,6 +861,19 @@ def merge_and_normalize(batches: list[dict[str, Any]]) -> tuple[dict[str, Any], 
 
         node["complexity"] = normalized
 
+    # ── Step 3b: Normalize business signals ──────────────────────────
+    business_signal_nodes = 0
+    business_signal_dropped = 0
+
+    for node in nodes_with_ids:
+        normalized_signals, dropped = normalize_business_signals(node)
+        business_signal_dropped += dropped
+        if normalized_signals:
+            node["businessSignals"] = normalized_signals
+            business_signal_nodes += 1
+        else:
+            node.pop("businessSignals", None)
+
     # ── Step 4: Rewrite edge references ──────────────────────────────
     edges_rewritten = 0
     for edge in all_edges:
@@ -800,24 +908,58 @@ def merge_and_normalize(batches: list[dict[str, Any]]) -> tuple[dict[str, Any], 
     # semantic relationships that the dashboard renders distinctly.
     edges_by_key: dict[tuple[str, str, str, str], dict] = {}
     for edge in all_edges:
+        edge = dict(edge)
+        edge.pop("external", None)
+        edge.pop("externalReason", None)
+
         src = edge.get("source", "")
         tgt = edge.get("target", "")
         etype = edge.get("type", "")
         direction = edge.get("direction", "forward")
+        valid_src = isinstance(src, str) and bool(src)
+        valid_tgt = isinstance(tgt, str) and bool(tgt)
 
-        if src not in node_ids or tgt not in node_ids:
+        if not valid_src or not valid_tgt or src not in node_ids or tgt not in node_ids:
             missing = []
-            if src not in node_ids:
-                missing.append(f"source '{src}'")
-            if tgt not in node_ids:
-                missing.append(f"target '{tgt}'")
-            unfixable.append(f"Edge {src} → {tgt} ({etype}): dropped, missing {', '.join(missing)}")
-            continue
+            if not valid_src or src not in node_ids:
+                missing.append("source")
+            if not valid_tgt or tgt not in node_ids:
+                missing.append("target")
+            if preserve_external and valid_src and valid_tgt:
+                edge["external"] = True
+            else:
+                missing_details = []
+                if not valid_src or src not in node_ids:
+                    missing_details.append(f"source '{src}'")
+                if not valid_tgt or tgt not in node_ids:
+                    missing_details.append(f"target '{tgt}'")
+                unfixable.append(f"Edge {src} → {tgt} ({etype}): dropped, missing {', '.join(missing_details)}")
+                continue
 
         key = (src, tgt, etype, direction)
         existing = edges_by_key.get(key)
         if existing is None or _num(edge.get("weight", 0)) > _num(existing.get("weight", 0)):
             edges_by_key[key] = edge
+
+    external_edges_preserved = sum(
+        1 for edge in edges_by_key.values()
+        if edge.get("external") is True
+    )
+
+    stripped_nodes, stripped_edges, symbol_stats = strip_symbol_graph(
+        list(nodes_by_id.values()),
+        list(edges_by_key.values()),
+    )
+    nodes_by_id = {node["id"]: node for node in stripped_nodes}
+    edges_by_key = {
+        (e["source"], e["target"], e.get("type", ""), e.get("direction", "forward")): e
+        for e in stripped_edges
+    }
+    symbol_strip_lines: list[str] = []
+    if symbol_stats["nodes_removed"] or symbol_stats["edges_removed"]:
+        symbol_strip_lines.append("Symbol slim:")
+        symbol_strip_lines.append(f"  {symbol_stats['nodes_removed']:>4} × function/class nodes removed")
+        symbol_strip_lines.append(f"  {symbol_stats['edges_removed']:>4} × symbol edges removed")
 
     # ── Build report ─────────────────────────────────────────────────
     report: list[str] = []
@@ -861,6 +1003,24 @@ def merge_and_normalize(batches: list[dict[str, Any]]) -> tuple[dict[str, Any], 
         report.append(f"  {tested_by_added:>4} × tested_by edges produced (path-convention supplement, production → test)")
         report.append(f"  {tested_by_tagged:>4} × production nodes tagged \"tested\"")
 
+    # Business signals section — cleaned optional product-facing hints.
+    if business_signal_nodes or business_signal_dropped:
+        report.append("")
+        report.append("Business signals:")
+        report.append(f"  {business_signal_nodes:>4} × nodes with businessSignals preserved")
+        report.append(f"  {business_signal_dropped:>4} × malformed/duplicate/over-cap businessSignals dropped")
+
+    if symbol_strip_lines:
+        report.append("")
+        report.extend(symbol_strip_lines)
+
+    # Shard mode section — external endpoints are expected when only a scoped
+    # subset of nodes is assembled.
+    if external_edges_preserved:
+        report.append("")
+        report.append("Shard mode:")
+        report.append(f"  {external_edges_preserved:>4} × external edges preserved for shard mode")
+
     # Could not fix section — unknown patterns (grouped) + individual details
     unfixable_total = (
         len(unfixable)
@@ -897,6 +1057,7 @@ def merge_and_normalize(batches: list[dict[str, Any]]) -> tuple[dict[str, Any], 
 def recover_imports_from_scan(
     assembled: dict[str, Any],
     scan_result_path: Path,
+    preserve_external: bool = False,
 ) -> tuple[int, list[str]]:
     """Re-emit any `imports` edges that exist in `scan-result.json#importMap`
     but never made it into a batch's output. The project-scanner's importMap
@@ -932,6 +1093,7 @@ def recover_imports_from_scan(
             existing.add((edge.get("source", ""), edge.get("target", "")))
 
     recovered = 0
+    recovered_external = 0
     skipped_no_src_node = 0
     skipped_no_tgt_node = 0
     for src_path, targets in import_map.items():
@@ -947,7 +1109,25 @@ def recover_imports_from_scan(
                 continue
             tgt_id = f"file:{tgt_path}"
             if tgt_id not in file_node_ids:
-                skipped_no_tgt_node += 1
+                if preserve_external:
+                    if src_id == tgt_id:
+                        continue
+                    if (src_id, tgt_id) in existing:
+                        continue
+                    assembled["edges"].append({
+                        "source": src_id,
+                        "target": tgt_id,
+                        "type": "imports",
+                        "direction": "forward",
+                        "weight": 0.7,
+                        "external": True,
+                        "recoveredFromImportMap": True,
+                    })
+                    existing.add((src_id, tgt_id))
+                    recovered += 1
+                    recovered_external += 1
+                else:
+                    skipped_no_tgt_node += 1
                 continue
             if src_id == tgt_id:
                 continue
@@ -979,22 +1159,116 @@ def recover_imports_from_scan(
             f"  Skipped {skipped_no_tgt_node} importMap target paths "
             f"with no `file:` node in graph"
         )
+    if recovered_external:
+        lines.append(
+            f"  Recovered {recovered_external} external `imports` edges from importMap"
+        )
     return recovered, lines
 
 
 # ── Main ──────────────────────────────────────────────────────────────────
 
-def main() -> None:
-    if len(sys.argv) < 2:
-        print("Usage: python merge-batch-graphs.py <project-root>", file=sys.stderr)
+def parse_args(argv: list[str]) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Merge and normalize batch analysis results.",
+    )
+    parser.add_argument("project_root")
+    parser.add_argument(
+        "--import-recovery-only",
+        action="store_true",
+        help="Only recover imports edges from scan-result.json into --graph (no batch merge).",
+    )
+    parser.add_argument(
+        "--graph",
+        default=None,
+        help="Graph JSON path for --import-recovery-only.",
+    )
+    parser.add_argument(
+        "--intermediate-dir",
+        default=None,
+        help="Read batch-*.json and scan-result.json from this directory instead of the default project intermediate directory.",
+    )
+    parser.add_argument(
+        "--output",
+        default=None,
+        help="Write the assembled graph to this path instead of intermediate/assembled-graph.json.",
+    )
+    parser.add_argument(
+        "--preserve-external",
+        "--allow-external-edges",
+        action="store_true",
+        help=(
+            "Keep imports edges whose target is outside the merged node set "
+            "(scoped shard staging and sharded incremental candidates)."
+        ),
+    )
+    return parser.parse_args(argv)
+
+
+def run_import_recovery_only(
+    project_root: Path,
+    graph_path: Path,
+    *,
+    preserve_external_cli: bool = False,
+) -> None:
+    if not graph_path.is_file():
+        print(f"Error: graph file does not exist: {graph_path}", file=sys.stderr)
         sys.exit(1)
 
-    project_root = Path(sys.argv[1]).resolve()
-    intermediate_dir = project_root / ".understand-anything" / "intermediate"
+    preserve_external = resolve_preserve_external(
+        cli_flag=preserve_external_cli,
+        output_path=graph_path,
+    )
+    assembled = json.loads(graph_path.read_text(encoding="utf-8"))
+    scan_result_path = project_root / ".understand-anything" / "intermediate" / "scan-result.json"
+    recovered, recovery_report = recover_imports_from_scan(
+        assembled,
+        scan_result_path,
+        preserve_external=preserve_external,
+    )
+
+    print("", file=sys.stderr)
+    print("Imports edge recovery:", file=sys.stderr)
+    for line in recovery_report:
+        print(line, file=sys.stderr)
+
+    graph_path.write_text(json.dumps(assembled, indent=2, ensure_ascii=False), encoding="utf-8")
+    print(f"\nUpdated {graph_path}", file=sys.stderr)
+    if recovered:
+        print(f"  Recovered {recovered} imports edges", file=sys.stderr)
+
+
+def main() -> None:
+    args = parse_args(sys.argv[1:])
+
+    project_root = Path(args.project_root).resolve()
+
+    if args.import_recovery_only:
+        if not args.graph:
+            print("Error: --import-recovery-only requires --graph <path>", file=sys.stderr)
+            sys.exit(1)
+        run_import_recovery_only(
+            project_root,
+            Path(args.graph).resolve(),
+            preserve_external_cli=args.preserve_external,
+        )
+        return
+
+    intermediate_dir = (
+        Path(args.intermediate_dir).resolve()
+        if args.intermediate_dir
+        else project_root / ".understand-anything" / "intermediate"
+    )
 
     if not intermediate_dir.is_dir():
         print(f"Error: {intermediate_dir} does not exist", file=sys.stderr)
         sys.exit(1)
+
+    output_path = Path(args.output).resolve() if args.output else intermediate_dir / "assembled-graph.json"
+    preserve_external = resolve_preserve_external(
+        cli_flag=args.preserve_external,
+        output_path=output_path,
+    )
 
     # Discover batch files, sorted by numeric index (not lexicographic)
     batch_files = sorted(
@@ -1024,13 +1298,22 @@ def main() -> None:
         sys.exit(1)
 
     # Merge and normalize
-    assembled, report = merge_and_normalize(batches)
+    assembled, report = merge_and_normalize(
+        batches,
+        preserve_external=preserve_external,
+    )
 
     # Recover any imports edges file-analyzer batches dropped despite
     # `batchImportData` containing them. The project-scanner's importMap
     # is the deterministic source of truth.
     scan_result_path = intermediate_dir / "scan-result.json"
-    recovered, recovery_report = recover_imports_from_scan(assembled, scan_result_path)
+    if not scan_result_path.is_file():
+        scan_result_path = project_root / ".understand-anything" / "intermediate" / "scan-result.json"
+    recovered, recovery_report = recover_imports_from_scan(
+        assembled,
+        scan_result_path,
+        preserve_external=preserve_external,
+    )
     if recovery_report:
         report.append("")
         report.append("Imports edge recovery:")
@@ -1042,7 +1325,7 @@ def main() -> None:
         print(line, file=sys.stderr)
 
     # Write output
-    output_path = intermediate_dir / "assembled-graph.json"
+    output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(json.dumps(assembled, indent=2, ensure_ascii=False), encoding="utf-8")
 
     size_kb = output_path.stat().st_size / 1024

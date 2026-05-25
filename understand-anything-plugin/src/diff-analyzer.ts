@@ -23,7 +23,8 @@ export function buildDiffContext(
   graph: KnowledgeGraph,
   changedFiles: string[],
 ): DiffContext {
-  const { nodes, edges, layers } = graph;
+  const { nodes, edges } = graph;
+  const layers = graph.layers ?? [];
 
   const changedNodeIds = new Set<string>();
   const unmappedFiles: string[] = [];
@@ -38,13 +39,6 @@ export function buildDiffContext(
     }
     if (!mapped) {
       unmappedFiles.push(file);
-    }
-  }
-
-  // Also include "contains" children of changed file nodes
-  for (const edge of edges) {
-    if (edge.type === "contains" && changedNodeIds.has(edge.source)) {
-      changedNodeIds.add(edge.target);
     }
   }
 

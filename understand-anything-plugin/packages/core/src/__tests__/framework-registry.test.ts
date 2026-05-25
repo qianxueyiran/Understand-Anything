@@ -106,16 +106,17 @@ describe("FrameworkRegistry", () => {
   });
 
   describe("createDefault", () => {
-    it("registers all 10 built-in framework configs", () => {
+    it("registers all 11 built-in framework configs", () => {
       const registry = FrameworkRegistry.createDefault();
-      expect(registry.getAllFrameworks()).toHaveLength(10);
+      expect(registry.getAllFrameworks()).toHaveLength(11);
+      expect(registry.getById("android")?.entryPoints).toContain("**/*Activity.kt");
     });
 
     it("includes frameworks for multiple languages", () => {
       const registry = FrameworkRegistry.createDefault();
       expect(registry.getForLanguage("python").length).toBeGreaterThanOrEqual(3);
       expect(registry.getForLanguage("typescript").length).toBeGreaterThanOrEqual(2);
-      expect(registry.getForLanguage("java").length).toBeGreaterThanOrEqual(1);
+      expect(registry.getForLanguage("java").length).toBeGreaterThanOrEqual(2);
       expect(registry.getForLanguage("ruby").length).toBeGreaterThanOrEqual(1);
       expect(registry.getForLanguage("go").length).toBeGreaterThanOrEqual(1);
     });

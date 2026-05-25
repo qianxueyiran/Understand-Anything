@@ -1,5 +1,6 @@
 import type { FrameworkConfig } from "../types.js";
 
+import { androidConfig } from "./android.js";
 import { djangoConfig } from "./django.js";
 import { fastapiConfig } from "./fastapi.js";
 import { flaskConfig } from "./flask.js";
@@ -12,6 +13,7 @@ import { railsConfig } from "./rails.js";
 import { ginConfig } from "./gin.js";
 
 export const builtinFrameworkConfigs: FrameworkConfig[] = [
+  androidConfig,
   djangoConfig,
   fastapiConfig,
   flaskConfig,
@@ -25,6 +27,7 @@ export const builtinFrameworkConfigs: FrameworkConfig[] = [
 ];
 
 export {
+  androidConfig,
   djangoConfig,
   fastapiConfig,
   flaskConfig,

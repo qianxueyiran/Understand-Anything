@@ -1,21 +1,31 @@
 ---
 name: understand
 description: Analyze a codebase to produce an interactive knowledge graph for understanding architecture, components, and relationships
-argument-hint: ["[path] [--full|--auto-update|--no-auto-update|--review|--language <lang>]"]
+argument-hint: ["[path] [--full|--update-diff|--auto-update|--no-auto-update|--review|--language <lang>|--scope <paths>|--shard <id>]"]
 ---
 
 # /understand
 
 Analyze the current codebase and produce a `knowledge-graph.json` file in `.understand-anything/`. This file powers the interactive dashboard for exploring the project's architecture.
 
+## Mandatory Execution Contract
+
+- Treat this skill as a strict workflow contract: run the required phase subagents (`project-scanner`, `file-analyzer`, `assemble-reviewer`, and `graph-reviewer` when requested). Do not generate `layers` or `tour` — omit both keys from saved `knowledge-graph.json` (and shard graphs).
+- Do not replace required subagents with ad hoc scripts, heuristics, or manual JSON assembly. Use scripts only where this skill explicitly names them as phase-internal tools.
+- If a required phase fails after the documented retry, stop and report the failure; continue with a reduced workflow only after explicit user approval.
+- Before Phase 1, honor `.understandignore` confirmation; before finishing, report which subagents actually ran and the validation result.
+
 ## Options
 
 - `$ARGUMENTS` may contain:
   - `--full` — Force a full rebuild, ignoring any existing graph
+  - `--update-diff` — 显式根据 git diff 更新既有 graph。普通 `knowledge-graph.json` 复用现有非分片增量路径；当根 graph 为 `kind: "codebase-sharded"` 时，只执行 code shard 的 sharded file-level incremental（分片文件级增量）并一次性更新所有受影响 code shards。
   - `--auto-update` — Enable automatic graph updates on commit (writes `autoUpdate: true` to `.understand-anything/config.json`)
   - `--no-auto-update` — Disable automatic graph updates (writes `autoUpdate: false` to `.understand-anything/config.json`)
   - `--review` — Run full LLM graph-reviewer instead of inline deterministic validation
   - `--language <lang>` — Generate descriptive textual content (summaries, descriptions, tags, titles, languageNotes, languageLesson) in the specified language. Accepts ISO 639-1 codes (`zh`, `ja`, `ko`, `en`, `es`, `fr`, `de`, etc.) or friendly names (`chinese`, `japanese`, `korean`, `english`, `spanish`, etc.). Locale variants supported: `zh-TW`, `zh-HK`, etc. Defaults to `zh` (Chinese). Stores preference in `.understand-anything/config.json` for consistency across incremental updates. Code identifiers, file paths, API names, framework/library names, schema fields, and standard technical keywords should remain in their original language when that preserves accuracy and searchability.
+  - `--scope <paths>` — Only analyze comma-separated project-relative paths; pair with `--shard` to generate a shard.
+  - `--shard <id>` — Save scoped analysis to `.understand-anything/shards/<id>.json`; requires `--scope`; id may contain only letters, numbers, `_`, and `-`.
   - A directory path (e.g. `/path/to/repo` or `../other-project`) — Analyze the given directory instead of the current working directory
 
 ---
@@ -25,11 +35,12 @@ Analyze the current codebase and produce a `knowledge-graph.json` file in `.unde
 Determine whether to run a full analysis or incremental update.
 
 1. **Resolve `PROJECT_ROOT`:**
-   - Parse `$ARGUMENTS` for a non-flag token (any argument that does not start with `--`). If found, treat it as the target directory path.
+   - Parse `$ARGUMENTS` for the first non-flag token that is not the value of a known value-taking flag. When resolving the directory path, ignore these flags and their immediately following values: `--language <lang>`, `--scope <paths>`, and `--shard <id>`. If a remaining non-flag token is found, treat it as the target directory path.
      - If the path is relative, resolve it against the current working directory.
      - Verify the resolved path exists and is a directory (run `test -d <path>`). If it does not exist or is not a directory, report an error to the user and **STOP**.
      - Set `PROJECT_ROOT` to the resolved absolute path.
    - If no directory path argument is found, set `PROJECT_ROOT` to the current working directory.
+   - If both a directory path argument and `--scope` are provided, scope entries are still project-relative paths resolved against the final `PROJECT_ROOT`.
    - **Worktree redirect.** If `PROJECT_ROOT` is inside a git worktree (not the main checkout), redirect output to the main repository root. Worktrees managed by Claude Code are ephemeral — `.understand-anything/` written there is destroyed when the session ends, taking the knowledge graph with it (issue #133). Detect a worktree by comparing `git rev-parse --git-dir` against `git rev-parse --git-common-dir`; in a normal checkout or submodule they resolve to the same path, in a worktree they differ and the parent of `--git-common-dir` is the main repo root.
 
      ```bash
@@ -115,7 +126,7 @@ Determine whether to run a full analysis or incremental update.
     - If `--no-auto-update` is in `$ARGUMENTS`: write `{"autoUpdate": false}` to `$PROJECT_ROOT/.understand-anything/config.json`
     - These flags only set the config — analysis proceeds normally regardless.
 
- 3.6. **Language configuration:**
+3.6. **Language configuration:**
     - Parse `$ARGUMENTS` for `--language <lang>` flag. If found, extract the language code.
     - **Language code normalization:** Map friendly names to ISO codes:
       - `chinese` → `zh`, `japanese` → `ja`, `korean` → `ko`, `english` → `en`, `spanish` → `es`, `french` → `fr`, `german` → `de`, `portuguese` → `pt`, `russian` → `ru`, `arabic` → `ar`, etc.
@@ -128,10 +139,23 @@ Determine whether to run a full analysis or incremental update.
       - Store as `$OUTPUT_LANGUAGE` for use throughout all phases.
     - **Language directive template:** Store as `$LANGUAGE_DIRECTIVE`:
       ```markdown
-      > **Language directive**: Generate descriptive textual content (`description`、`summary`、`title`、`languageNotes`、`languageLesson`, and natural-language explanations) in **{language}**. Maintain technical accuracy while using natural, native-level phrasing in the target language. Keep code identifiers, file paths, schema fields, framework/library names, API names, and standard technical keywords in their original language when that preserves accuracy or searchability (e.g., "middleware", "hook", "barrel"). Tags may keep concise English technical keywords when they are standard and searchable; otherwise localize them naturally.
+      > **Language directive**: Generate descriptive textual content (`description`、`summary`、`title`、`tags`、`businessSignals[].text`、`languageNotes`、`languageLesson`, and natural-language explanations) in **{language}**. Maintain technical accuracy while using natural, native-level phrasing in the target language. Keep code identifiers, file paths, schema fields, framework/library names, API names, and standard technical keywords in their original language when that preserves accuracy or searchability (e.g., "middleware", "hook", "barrel"). For Chinese: write `summary`, `tags`, and `businessSignals[].text` in Chinese unless no natural translation exists for a standard technical tag.
       ```
 
- 4. **Check for subdomain knowledge graphs to merge:**
+3.7. **Scoped shard configuration:**
+    - Parse `$ARGUMENTS` for `--scope <paths>` and `--shard <id>`.
+    - If exactly one of `--scope` or `--shard` is present, report an error and **STOP**. Scoped shard mode requires both flags.
+    - If neither flag is present, set `SCOPED_SHARD_MODE=false` and continue the existing full/incremental flow.
+    - If both flags are present:
+      - Split `--scope <paths>` by comma, trim each item, and reject empty items.
+      - Treat every scope item as project-relative, resolve it against `$PROJECT_ROOT`, and store the original trimmed values as `$SCOPE_PATHS`.
+      - Reject any scope whose resolved path does not exist.
+      - Reject any scope whose resolved path is outside `$PROJECT_ROOT`.
+      - Validate `$SHARD_ID` with `^[A-Za-z0-9_-]+$`; if it fails, report an error and **STOP**.
+      - Set `SCOPED_SHARD_MODE=true`, `SHARD_ID=<id>`, `SCOPE_PATHS=<trimmed comma-separated project-relative paths>`, and `SCOPE_ROOTS=<absolute resolved scope roots>`.
+      - Scoped shard mode runs scoped full analysis, restricts scanning to the configured scope roots, and saves to the shard output path in Phase 5.
+
+4. **Check for subdomain knowledge graphs to merge:**
    List all `*knowledge-graph*.json` files in `$PROJECT_ROOT/.understand-anything/` **excluding** `knowledge-graph.json` itself (e.g. `frontend-knowledge-graph.json`, `backend-knowledge-graph.json`). If any subdomain graphs exist, run the merge script bundled with this skill (located next to this SKILL.md file — use the skill directory path, not the project root):
    ```bash
    python <SKILL_DIR>/merge-subdomain-graphs.py $PROJECT_ROOT
@@ -144,13 +168,22 @@ Determine whether to run a full analysis or incremental update.
 
    | Condition | Action |
    |---|---|
+   | `SCOPED_SHARD_MODE=true` | Always run scoped full analysis for the requested scope roots. Ignore existing main `knowledge-graph.json` / `meta.json` state for unchanged, incremental, and review-only decisions. `--review` does not change this scoped shard rebuild decision; it only controls whether Phase 4 uses the LLM reviewer. |
    | `--full` flag in `$ARGUMENTS` | Full analysis (all phases) |
+   | `--update-diff` + existing graph `kind !== "codebase-sharded"` | Existing non-sharded incremental update path |
+   | `--update-diff` + existing graph `kind === "codebase-sharded"` | Sharded file-level incremental update. Compute one global git diff, map changed files to affected code shards, patch every affected code shard, refresh the code manifest, and advance `knowledge-graph.json.update.gitCommitHash` after code shard work succeeds. Product/domain refresh is handled by `/understand-refresh`, not by `/understand`. |
    | No existing graph or meta | Full analysis (all phases) |
-   | `--review` flag + existing graph + unchanged commit hash | Skip to Phase 6 (review-only — reuse existing assembled graph) |
+   | `--review` flag + existing graph + unchanged commit hash | Skip to Phase 4 (review-only — reuse existing assembled graph) |
    | Existing graph + unchanged commit hash | Ask the user: "The graph is up to date at this commit. Would you like to: **(a)** run a full rebuild (`--full`), **(b)** run the LLM graph reviewer (`--review`), or **(c)** do nothing?" Then follow their choice. If they pick (c), STOP. |
    | Existing graph + changed files | Incremental update (re-analyze changed files only) |
 
-   **Review-only path:** Copy the existing `knowledge-graph.json` to `$PROJECT_ROOT/.understand-anything/intermediate/assembled-graph.json`, then jump directly to Phase 6 step 3.
+   The review-only and incremental paths below apply only when `SCOPED_SHARD_MODE=false`.
+
+   **Sharded file-level incremental path (`--update-diff` + `kind: "codebase-sharded"`):** This branch is separate from the existing non-sharded incremental flow. Do not run the legacy non-sharded Phase 3 merge/finalize path for a sharded root manifest. `/understand` delegates detailed sharded update rules to `skills/understand/update-diff-workflow.md`.
+
+   Read and follow **`skills/understand/update-diff-workflow.md`** end-to-end (orchestration steps, dispatch prompts, status contracts). STOP after the sharded update summary. Do not continue into the non-sharded phases below.
+
+   **Review-only path:** Copy the existing `knowledge-graph.json` to `$PROJECT_ROOT/.understand-anything/intermediate/assembled-graph.json`, then jump directly to Phase 4 step 3.
 
    For incremental updates, get the changed file list:
    ```bash
@@ -211,7 +244,7 @@ Set up and verify the `.understandignore` file before scanning.
 
 ---
 
-## Phase 1 — SCAN (Full analysis only)
+## Phase 1 — SCAN (Full rebuild and scoped shard only)
 
 Dispatch a subagent using the `project-scanner` agent definition (at `agents/project-scanner.md`). Append the following additional context:
 
@@ -235,6 +268,10 @@ Pass these parameters in the dispatch prompt:
 
 > Scan this project directory to discover all project files (including non-code files like configs, docs, infrastructure), detect languages and frameworks.
 > Project root: `$PROJECT_ROOT`
+> Scope mode: `$SCOPED_SHARD_MODE`
+> Scope roots: `$SCOPE_ROOTS`
+> If scope mode is true, include only files under these scope roots in `files`. Returned file paths must still be relative to `$PROJECT_ROOT`.
+> In scope mode, build `importMap` keys for scope files only, but resolve import targets against the **full repository** file list so cross-scope dependencies appear in `importMap` values.
 > Write output to: `$PROJECT_ROOT/.understand-anything/intermediate/scan-result.json`
 
 After the subagent completes, read `$PROJECT_ROOT/.understand-anything/intermediate/scan-result.json` to get:
@@ -258,7 +295,7 @@ If the scan result includes `filteredByIgnore > 0`, report:
 
 ### Full analysis path
 
-Batch the file list from Phase 1 into groups of **20-30 files each** (aim for ~25 files per batch for balanced sizes).
+Batch the file list from Phase 1 into groups of **20-40 files each** (aim for ~30 files per batch for balanced sizes).
 
 **Batching strategy for non-code files:**
 - Group related non-code files together in the same batch when possible:
@@ -270,7 +307,9 @@ Batch the file list from Phase 1 into groups of **20-30 files each** (aim for ~2
 - Non-code files can be mixed with code files in the same batch if batch sizes are small
 - Each file's `fileCategory` from Phase 1 must be included in the batch file list
 
-For each batch, dispatch a subagent using the `file-analyzer` agent definition (at `agents/file-analyzer.md`). Run up to **5 subagents concurrently** using parallel dispatch. Append the following additional context:
+**注意：无论什么原因，不允许跳过使用subagent执行file-analyzer的步骤！如果运行遇到问题，尝试解决，如果无法解决，停下来寻求帮助！不允许使用脚本模拟执行！**
+
+For each batch, dispatch a subagent using the `file-analyzer` agent definition (at `agents/file-analyzer.md`). Run up to **8 subagents concurrently** using parallel dispatch. Append the following additional context:
 
 > **Additional context from main session:**
 >
@@ -307,9 +346,18 @@ Fill in batch-specific parameters below and dispatch:
 > ...
 
 After ALL batches complete, run the merge-and-normalize script bundled with this skill (located next to this SKILL.md file — use the skill directory path, not the project root):
+
+Full mode:
 ```bash
 python <SKILL_DIR>/merge-batch-graphs.py $PROJECT_ROOT
 ```
+
+Scoped shard mode (same staging path as full mode; retain cross-shard `imports` edges):
+```bash
+python <SKILL_DIR>/merge-batch-graphs.py $PROJECT_ROOT --preserve-external
+```
+
+Both modes write Phase 2 output to `$PROJECT_ROOT/.understand-anything/intermediate/assembled-graph.json`. Do **not** pass `--output` to `shards/$SHARD_ID.json` here — Phase 3/4 review and validate the intermediate staging file; Phase 5 publishes the final shard graph.
 
 This script reads all `batch-*.json` files from `$PROJECT_ROOT/.understand-anything/intermediate/`, then in one pass:
 - Combines all nodes and edges across batches
@@ -317,7 +365,7 @@ This script reads all `batch-*.json` files from `$PROJECT_ROOT/.understand-anyth
 - Normalizes complexity values (`low`→`simple`, `medium`→`moderate`, `high`→`complex`, etc.)
 - Rewrites edge references to match corrected node IDs
 - Deduplicates nodes by ID (keeps last occurrence) and edges by `(source, target, type)`
-- Drops dangling edges referencing missing nodes
+- Drops dangling edges referencing missing nodes (except cross-shard `imports` when `--preserve-external` is set)
 - Logs all corrections and dropped items to stderr
 
 The merge script also runs a `tested_by` linker that canonicalizes test-coverage edges in two passes. **Pass 1** walks LLM-emitted `tested_by` edges and flips inverted ones in place (the LLM systematically emits `test → production` because it sees the import only when analyzing the test file); semantically broken edges (test↔test, prod↔prod, orphan endpoints) are dropped. **Pass 2** supplements with path-convention pairings (`X.ts` ↔ `X.test.ts`, JS/TS `__tests__/` and `<dir>/test/` walk-out, Python in-package `tests/`, Go `_test.go` sibling, Maven/Gradle `src/test/...` ↔ `src/main/...`, .NET `<svc>/tests/` ↔ `<svc>/src/...` and `<App>.Tests/` ↔ `<App>/`). Production nodes that end up sourcing any `tested_by` edge get a `"tested"` tag. All resulting edges run `production → test`.
@@ -327,6 +375,8 @@ Output: `$PROJECT_ROOT/.understand-anything/intermediate/assembled-graph.json`
 Include the script's warnings in `$PHASE_WARNINGS` for the reviewer.
 
 ### Incremental update path
+
+This path applies only when `SCOPED_SHARD_MODE=false`. Scoped shard mode always runs scoped full analysis for the requested scope roots and does not use the main graph incremental update path.
 
 Use the changed files list from Phase 0. Batch and dispatch file-analyzer subagents using the same process as above (20-30 files per batch, up to 5 concurrent, with batchImportData constructed from $IMPORT_MAP), but only for changed files.
 
@@ -338,6 +388,10 @@ After batches complete:
    ```bash
    python <SKILL_DIR>/merge-batch-graphs.py $PROJECT_ROOT
    ```
+
+### Sharded file-level incremental update path
+
+For sharded `--update-diff`, do not follow the legacy non-sharded Phase 2 merge/finalize flow. Read and follow **`skills/understand/update-diff-workflow.md`** end-to-end, then stop after the sharded update summary.
 
 ---
 
@@ -366,159 +420,7 @@ After the subagent completes, read `$PROJECT_ROOT/.understand-anything/intermedi
 
 ---
 
-## Phase 4 — ARCHITECTURE
-
-**Build the combined prompt template:**
- 1. Use the `architecture-analyzer` agent definition (at `agents/architecture-analyzer.md`).
- 2. **Language context injection:** For each language detected in Phase 1 (e.g., `python`, `markdown`, `dockerfile`, `yaml`, `sql`, `terraform`, `graphql`, `protobuf`, `shell`, `html`, `css`), read the file at `./languages/<language-id>.md` (e.g., `./languages/python.md`, `./languages/dockerfile.md`) and append its content after the base template under a `## Language Context` header. If the file does not exist for a detected language, skip it silently and continue. These files are in the `languages/` subdirectory next to this SKILL.md file. **Include non-code language snippets** — they provide edge patterns and summary styles for non-code files.
- 3. **Framework addendum injection:** For each framework detected in Phase 1 (e.g., `Django`), read the file at `./frameworks/<framework-id-lowercase>.md` (e.g., `./frameworks/django.md`) and append its full content after the language context. If the file does not exist for a detected framework, skip it silently and continue. These files are in the `frameworks/` subdirectory next to this SKILL.md file.
- 4. **Output locale injection:** If `$OUTPUT_LANGUAGE` is NOT `en` (English), read the locale guidance file at `./locales/<language-code>.md` (e.g., `./locales/zh.md`, `./locales/ja.md`, `./locales/ko.md`) and append its content after the framework addendums under a `## Output Language Guidelines` header. This provides language-specific guidance for tag naming conventions, summary style, and layer name translations. If the locale file does not exist for the specified language, skip silently — the `$LANGUAGE_DIRECTIVE` still applies. These files are in the `locales/` subdirectory next to this SKILL.md file.
-
-Append the language/framework context and the following additional context to the agent's prompt:
-
-> **Additional context from main session:**
->
-> Frameworks detected: `<frameworks from Phase 1>`
->
-> Directory tree (top 2 levels):
-> ```
-> $DIR_TREE
-> ```
->
-> Use the directory tree, language context, and framework addendums (appended above) to inform layer assignments. Directory structure is strong evidence for layer boundaries. Non-code files (config, docs, infrastructure, data) should be assigned to appropriate layers — see the prompt template for guidance.
->
-> $LANGUAGE_DIRECTIVE
-
-Pass these parameters in the dispatch prompt:
-
-> Analyze this codebase's structure to identify architectural layers.
-> Project root: `$PROJECT_ROOT`
-> Write output to: `$PROJECT_ROOT/.understand-anything/intermediate/layers.json`
-> Project: `<projectName>` — `<projectDescription>`
->
-> File nodes (all node types — includes code files, config, document, service, pipeline, table, schema, resource, endpoint):
-> ```json
-> [list of {id, type, name, filePath, summary, tags} for ALL file-level nodes — omit complexity, languageNotes]
-> ```
->
-> Import edges:
-> ```json
-> [list of edges with type "imports"]
-> ```
->
-> All edges (for cross-category analysis — includes configures, documents, deploys, triggers, etc.):
-> ```json
-> [list of ALL edges — include all edge types]
-> ```
-
-After the subagent completes, read `$PROJECT_ROOT/.understand-anything/intermediate/layers.json` and normalize it into a final `layers` array. Apply these steps **in order**:
-
-1. **Unwrap envelope:** If the file contains `{ "layers": [...] }` instead of a plain array, extract the inner array. (The prompt requests a plain array, but LLMs may still produce an envelope.)
-2. **Rename legacy fields:** If any layer object has a `nodes` field instead of `nodeIds`, rename `nodes` → `nodeIds`. If `nodes` entries are objects with an `id` field rather than plain strings, extract just the `id` values into `nodeIds`.
-3. **Synthesize missing IDs:** If any layer is missing an `id`, generate one as `layer:<kebab-case-name>`.
-4. **Convert file paths:** If `nodeIds` entries are raw file paths without a known prefix (`file:`, `config:`, `document:`, `service:`, `pipeline:`, `table:`, `schema:`, `resource:`, `endpoint:`), convert them to `file:<relative-path>`.
-5. **Drop dangling refs:** Remove any `nodeIds` entries that do not exist in the merged node set.
-
-Each element of the final `layers` array MUST have this shape:
-
-```json
-[
-  {
-    "id": "layer:<kebab-case-name>",
-    "name": "<layer name>",
-    "description": "<what belongs in this layer>",
-    "nodeIds": ["file:src/App.tsx", "config:tsconfig.json", "document:README.md"]
-  }
-]
-```
-
-All four fields (`id`, `name`, `description`, `nodeIds`) are required.
-
-**For incremental updates:** Always re-run architecture analysis on the full merged node set, since layer assignments may shift when files change.
-
-**Context for incremental updates:** When re-running architecture analysis, also inject the previous layer definitions:
-
-> Previous layer definitions (for naming consistency):
-> ```json
-> [previous layers from existing graph]
-> ```
->
-> Maintain the same layer names and IDs where possible. Only add/remove layers if the file structure has materially changed.
-
----
-
-## Phase 5 — TOUR
-
-Dispatch a subagent using the `tour-builder` agent definition (at `agents/tour-builder.md`). Append the following additional context:
-
-> **Additional context from main session:**
->
-> Project README (first 3000 chars):
-> ```
-> $README_CONTENT
-> ```
->
-> Project entry point: `$ENTRY_POINT`
->
-> Use the README to align the tour narrative with the project's own documentation. Start the tour from the entry point if one was detected. The tour should tell the same story the README tells, but through the lens of actual code structure.
->
-> $LANGUAGE_DIRECTIVE
-
-Pass these parameters in the dispatch prompt:
-
-> Create a guided learning tour for this codebase.
-> Project root: `$PROJECT_ROOT`
-> Write output to: `$PROJECT_ROOT/.understand-anything/intermediate/tour.json`
-> Project: `<projectName>` — `<projectDescription>`
-> Languages: `<languages>`
->
-> Nodes (all file-level nodes — includes code files, config, document, service, pipeline, table, schema, resource, endpoint):
-> ```json
-> [list of {id, name, filePath, summary, type} for ALL file-level nodes — do NOT include function or class nodes]
-> ```
->
-> Layers:
-> ```json
-> [list of {id, name, description} for each layer — omit nodeIds]
-> ```
->
-> Edges (all types — includes imports, calls, configures, documents, deploys, triggers, etc.):
-> ```json
-> [list of ALL edges — include all edge types for complete graph topology analysis]
-> ```
-
-After the subagent completes, read `$PROJECT_ROOT/.understand-anything/intermediate/tour.json` and normalize it into a final `tour` array. Apply these steps **in order**:
-
-1. **Unwrap envelope:** If the file contains `{ "steps": [...] }` instead of a plain array, extract the inner array. (The prompt requests a plain array, but LLMs may still produce an envelope.)
-2. **Rename legacy fields:** If any step has `nodesToInspect` instead of `nodeIds`, rename it → `nodeIds`. If any step has `whyItMatters` instead of `description`, rename it → `description`.
-3. **Convert file paths:** If `nodeIds` entries are raw file paths without a known prefix (`file:`, `config:`, `document:`, `service:`, `pipeline:`, `table:`, `schema:`, `resource:`, `endpoint:`), convert them to `file:<relative-path>`.
-4. **Drop dangling refs:** Remove any `nodeIds` entries that do not exist in the merged node set.
-5. **Sort** by `order` before saving.
-
-Each element of the final `tour` array MUST have this shape:
-
-```json
-[
-  {
-    "order": 1,
-    "title": "Project Overview",
-    "description": "Start with the README to understand the project's purpose and architecture.",
-    "nodeIds": ["document:README.md"]
-  },
-  {
-    "order": 2,
-    "title": "Application Entry Point",
-    "description": "This step explains how the frontend boots and mounts.",
-    "nodeIds": ["file:src/main.tsx", "file:src/App.tsx"]
-  }
-]
-```
-
-Required fields: `order`, `title`, `description`, `nodeIds`. Preserve optional `languageLesson` when present.
-
----
-
-## Phase 6 — REVIEW
+## Phase 4 — REVIEW
 
 Assemble the full KnowledgeGraph JSON object:
 
@@ -534,20 +436,28 @@ Assemble the full KnowledgeGraph JSON object:
     "gitCommitHash": "<commit hash from Phase 0>"
   },
   "nodes": [<all nodes from assembled-graph.json after Phase 3 review>],
-  "edges": [<all edges from assembled-graph.json after Phase 3 review>],
-  "layers": [<layers from Phase 4>],
-  "tour": [<steps from Phase 5>]
+  "edges": [<all edges from assembled-graph.json after Phase 3 review>]
 }
 ```
 
-1. Before writing the assembled graph, validate that:
-   - `layers` is an array of objects with these required fields: `id`, `name`, `description`, `nodeIds`
-   - `tour` is an array of objects with these required fields: `order`, `title`, `description`, `nodeIds`
-   - `tour[*].languageLesson` is allowed as an optional string field
-   - Every `layers[*].nodeIds` entry exists in the merged node set
-   - Every `tour[*].nodeIds` entry exists in the merged node set
+Do not include `layers` or `tour` top-level keys.
 
-   If validation fails, automatically normalize and rewrite the graph into this shape before saving. If the graph still fails final validation after the normalization pass, save it with warnings but mark dashboard auto-launch as skipped.
+In scoped shard mode, add top-level shard metadata before saving:
+
+```json
+{
+  "shard": {
+    "id": "<SHARD_ID>",
+    "scopes": ["<SCOPE_PATHS entries>"],
+    "updatedAt": "<ISO 8601 timestamp>",
+    "gitCommitHash": "<commit hash from Phase 0>"
+  }
+}
+```
+
+1. Before writing the assembled graph, **delete** top-level `layers` and `tour` if present (from older graphs or review-only copies). Saved graphs must contain only `version`, `project`, `nodes`, and `edges` (plus `shard` metadata in scoped shard mode).
+
+   Validate `nodes` and `edges` only. If validation fails, automatically normalize and rewrite the graph before saving. If the graph still fails final validation after the normalization pass, save it with warnings but mark dashboard auto-launch as skipped.
 
 2. Write the assembled graph to `$PROJECT_ROOT/.understand-anything/intermediate/assembled-graph.json`.
 
@@ -574,6 +484,9 @@ try {
   graph.nodes.forEach((n, i) => {
     if (!n.id) { issues.push(`Node[${i}] missing id`); return; }
     if (!n.type) issues.push(`Node[${i}] '${n.id}' missing type`);
+    if (n.type === 'function' || n.type === 'class') {
+      issues.push(`Symbol node '${n.id}' (type: ${n.type}) must not exist in file-only graphs`);
+    }
     if (!n.name) issues.push(`Node[${i}] '${n.id}' missing name`);
     if (!n.summary) issues.push(`Node[${i}] '${n.id}' missing summary`);
     if (!n.tags || !n.tags.length) issues.push(`Node[${i}] '${n.id}' missing tags`);
@@ -585,26 +498,8 @@ try {
     if (!nodeIds.has(e.source)) issues.push(`Edge[${i}] source '${e.source}' not found`);
     if (!nodeIds.has(e.target)) issues.push(`Edge[${i}] target '${e.target}' not found`);
   });
-  const fileLevelTypes = new Set(['file', 'config', 'document', 'service', 'pipeline', 'table', 'schema', 'resource', 'endpoint']);
-  const fileNodes = graph.nodes.filter(n => fileLevelTypes.has(n.type)).map(n => n.id);
-  const assigned = new Map();
-  if (!Array.isArray(graph.layers)) { if (graph.layers) warnings.push('graph.layers is not an array'); graph.layers = []; }
-  if (!Array.isArray(graph.tour)) { if (graph.tour) warnings.push('graph.tour is not an array'); graph.tour = []; }
-  graph.layers.forEach(layer => {
-    (layer.nodeIds || []).forEach(id => {
-      if (!nodeIds.has(id)) issues.push(`Layer '${layer.id}' refs missing node '${id}'`);
-      if (assigned.has(id)) issues.push(`Node '${id}' appears in multiple layers`);
-      assigned.set(id, layer.id);
-    });
-  });
-  fileNodes.forEach(id => {
-    if (!assigned.has(id)) issues.push(`File node '${id}' not in any layer`);
-  });
-  graph.tour.forEach((step, i) => {
-    (step.nodeIds || []).forEach(id => {
-      if (!nodeIds.has(id)) issues.push(`Tour step[${i}] refs missing node '${id}'`);
-    });
-  });
+  delete graph.layers;
+  delete graph.tour;
   const withEdges = new Set([
     ...graph.edges.map(e => e.source),
     ...graph.edges.map(e => e.target)
@@ -612,11 +507,10 @@ try {
   graph.nodes.forEach(n => {
     if (!withEdges.has(n.id)) warnings.push(`Node '${n.id}' has no edges (orphan)`);
   });
+  fs.writeFileSync(graphPath, JSON.stringify(graph, null, 2));
   const stats = {
     totalNodes: graph.nodes.length,
     totalEdges: graph.edges.length,
-    totalLayers: graph.layers.length,
-    tourSteps: graph.tour.length,
     nodeTypes: graph.nodes.reduce((a, n) => { a[n.type] = (a[n.type]||0)+1; return a; }, {}),
     edgeTypes: graph.edges.reduce((a, e) => { a[e.type] = (a[e.type]||0)+1; return a; }, {})
   };
@@ -650,7 +544,7 @@ Dispatch a subagent using the `graph-reviewer` agent definition (at `agents/grap
 > ```
 >
 > Phase warnings/errors accumulated during analysis:
-> - [list any batch failures, skipped files, or warnings from Phases 2-5]
+> - [list any batch failures, skipped files, or warnings from Phases 2-3]
 >
 > Cross-validate: every file in the scan inventory should have a corresponding node in the graph (node types may vary: `file:`, `config:`, `document:`, `service:`, `pipeline:`, `table:`, `schema:`, `resource:`, `endpoint:`). Flag any missing files. Also flag any graph nodes whose `filePath` doesn't appear in the scan inventory.
 >
@@ -676,25 +570,34 @@ Pass these parameters in the dispatch prompt:
    - Re-run the final graph validation after automated fixes
    - If critical issues remain after one fix attempt, save the graph anyway but include the warnings in the final report and mark dashboard auto-launch as skipped
 
-6. **If `issues` array is empty:** Proceed to Phase 7.
+6. **If `issues` array is empty:** Proceed to Phase 5.
 
 ---
 
-## Phase 7 — SAVE
+## Phase 5 — SAVE
 
-1. Write the final knowledge graph to `$PROJECT_ROOT/.understand-anything/knowledge-graph.json`.
+1. Write the final knowledge graph:
+   - Full mode: write to `$PROJECT_ROOT/.understand-anything/knowledge-graph.json`.
+   - Scoped shard mode: write to `$PROJECT_ROOT/.understand-anything/shards/$SHARD_ID.json`, then refresh the sharded manifest:
+     ```bash
+     python <SKILL_DIR>/refresh-sharded-manifest.py $PROJECT_ROOT
+     ```
 
-2. Write metadata to `$PROJECT_ROOT/.understand-anything/meta.json`:
-   ```json
-   {
-     "lastAnalyzedAt": "<ISO 8601 timestamp>",
-     "gitCommitHash": "<commit hash>",
-     "version": "1.0.0",
-     "analyzedFiles": <number of files analyzed>
-   }
-   ```
+2. **Metadata persistence:**
+   - Full mode: write metadata to `$PROJECT_ROOT/.understand-anything/meta.json`:
+     ```json
+     {
+       "lastAnalyzedAt": "<ISO 8601 timestamp>",
+       "gitCommitHash": "<commit hash>",
+       "version": "1.0.0",
+       "analyzedFiles": <number of files analyzed>
+     }
+     ```
+   - Scoped shard mode: does not write global `$PROJECT_ROOT/.understand-anything/meta.json`. The shard's `scopes`, `updatedAt`, and `gitCommitHash` are recorded in top-level `shard` metadata in `$PROJECT_ROOT/.understand-anything/shards/$SHARD_ID.json` and in the root manifest generated by `refresh-sharded-manifest.py`.
 
-2.5. **Generate structural fingerprints** for all analyzed files and save to `$PROJECT_ROOT/.understand-anything/fingerprints.json`. This creates the baseline for future automatic incremental updates.
+3. **Generate structural fingerprints**:
+   - Full mode: generate structural fingerprints for all analyzed files and save to `$PROJECT_ROOT/.understand-anything/fingerprints.json`. This creates the baseline for future automatic incremental updates.
+   - Scoped shard mode: does not write global `$PROJECT_ROOT/.understand-anything/fingerprints.json` and does not update the global automatic incremental-update baseline.
 
    Write and execute a Node.js script that uses the core fingerprint module (tree-sitter-based, not regex):
    ```javascript
@@ -704,33 +607,33 @@ Pass these parameters in the dispatch prompt:
    const store = await buildFingerprintStore('<PROJECT_ROOT>', sourceFilePaths);
    saveFingerprints('<PROJECT_ROOT>', store);
    ```
-   Where `sourceFilePaths` is the list of all analyzed source file paths from Phase 1. This uses the same tree-sitter analysis pipeline as the main fingerprint engine, ensuring the baseline matches the comparison logic used during auto-updates.
+   Where `sourceFilePaths` is the list of all analyzed source file paths from Phase 1. This uses the same tree-sitter analysis pipeline as the main fingerprint engine, ensuring the baseline matches the comparison logic used during auto-updates. Skip this script in scoped shard mode.
 
-3. Clean up intermediate files:
+4. Clean up intermediate files:
    ```bash
    rm -rf $PROJECT_ROOT/.understand-anything/intermediate
    rm -rf $PROJECT_ROOT/.understand-anything/tmp
    ```
 
-4. Report a summary to the user containing:
+5. Report a summary to the user containing:
    - Project name and description
    - Files analyzed / total files (with breakdown by fileCategory: code, config, docs, infra, data, script, markup)
-   - Nodes created (broken down by type: file, function, class, config, document, service, table, endpoint, pipeline, schema, resource)
+   - Nodes created (broken down by type: file, config, document, service, table, endpoint, pipeline, schema, resource — code files emit `file` nodes only, not `function`/`class`)
    - Edges created (broken down by type)
-   - Layers identified (with names)
-   - Tour steps generated (count)
    - Any warnings from the reviewer
-   - Path to the output file: `$PROJECT_ROOT/.understand-anything/knowledge-graph.json`
+   - Path to the output file (`$PROJECT_ROOT/.understand-anything/knowledge-graph.json` in full mode, or `$PROJECT_ROOT/.understand-anything/shards/$SHARD_ID.json` in scoped shard mode)
 
-5. Only automatically launch the dashboard by invoking the `/understand-dashboard` skill if final graph validation passed after normalization/review fixes.
-   If final validation did not pass, report that the graph was saved with warnings and dashboard launch was skipped.
+6. Dashboard launch:
+   - Full mode: automatically launch the dashboard by invoking the `/understand-dashboard` skill if final graph validation passed after normalization/review fixes.
+   - Scoped shard mode: do not automatically launch `/understand-dashboard`; report the shard output path and manifest refresh result instead.
+   - If final validation did not pass, report that the graph was saved with warnings and dashboard launch was skipped.
 
 ---
 
 ## Error Handling
 
 - If any subagent dispatch fails, retry **once** with the same prompt plus additional context about the failure.
-- Track all warnings and errors from each phase in a `$PHASE_WARNINGS` list. When using `--review`, pass this list to the graph-reviewer in Phase 6. On the default path, include accumulated warnings in the Phase 7 final report.
+- Track all warnings and errors from each phase in a `$PHASE_WARNINGS` list. When using `--review`, pass this list to the graph-reviewer in Phase 4. On the default path, include accumulated warnings in the Phase 5 final report.
 - If it fails a second time, skip that phase and continue with partial results.
 - ALWAYS save partial results — a partial graph is better than no graph.
 - Report any skipped phases or errors in the final summary so the user knows what happened.
@@ -740,41 +643,34 @@ Pass these parameters in the dispatch prompt:
 
 ## Reference: KnowledgeGraph Schema
 
-### Node Types (13 total)
+### Node Types (file-analyzer output)
+
+Code files produce **`file`** nodes only. The pipeline does not emit `function` or `class` symbol nodes.
+
 | Type | Description | ID Convention |
 |---|---|---|
 | `file` | Source code file | `file:<relative-path>` |
-| `function` | Function or method | `function:<relative-path>:<name>` |
-| `class` | Class, interface, or type | `class:<relative-path>:<name>` |
-| `module` | Logical module or package | `module:<name>` |
-| `concept` | Abstract concept or pattern | `concept:<name>` |
-| `config` | Configuration file (YAML, JSON, TOML, env) | `config:<relative-path>` |
-| `document` | Documentation file (Markdown, RST, TXT) | `document:<relative-path>` |
-| `service` | Deployable service definition (Dockerfile, K8s) | `service:<relative-path>` |
+| `config` | Configuration file | `config:<relative-path>` |
+| `document` | Documentation file | `document:<relative-path>` |
+| `service` | Deployable service (Dockerfile, K8s) | `service:<relative-path>` |
 | `table` | Database table or migration | `table:<relative-path>:<table-name>` |
-| `endpoint` | API endpoint or route definition | `endpoint:<relative-path>:<endpoint-name>` |
-| `pipeline` | CI/CD pipeline configuration | `pipeline:<relative-path>` |
-| `schema` | Schema definition (GraphQL, Protobuf, Prisma) | `schema:<relative-path>` |
-| `resource` | Infrastructure resource (Terraform, CloudFormation) | `resource:<relative-path>` |
+| `endpoint` | API endpoint or route | `endpoint:<relative-path>:<endpoint-name>` |
+| `pipeline` | CI/CD pipeline | `pipeline:<relative-path>` |
+| `schema` | Schema definition | `schema:<relative-path>` |
+| `resource` | Infrastructure resource | `resource:<relative-path>` |
 
-### Edge Types (26 total)
-| Category | Types |
-|---|---|
-| Structural | `imports`, `exports`, `contains`, `inherits`, `implements` |
-| Behavioral | `calls`, `subscribes`, `publishes`, `middleware` |
-| Data flow | `reads_from`, `writes_to`, `transforms`, `validates` |
-| Dependencies | `depends_on`, `tested_by`, `configures` |
-| Semantic | `related`, `similar_to` |
-| Infrastructure | `deploys`, `serves`, `provisions`, `triggers` |
-| Schema/Data | `migrates`, `documents`, `routes`, `defines_schema` |
+Reserved for other agents (not emitted by file-analyzer): `module`, `concept`, `domain`, `flow`, `step`. Legacy graphs may still contain `function`/`class` until re-analyzed.
 
-### Edge Weight Conventions
+### Edge Types (file-analyzer code files)
+
+Code files emit **`imports`**, **`depends_on`**, and **`tested_by`** only (file-level endpoints). Symbol edges (`contains`, `exports`, `calls`, `inherits`, `implements`) are not emitted.
+
+Non-code files may also emit: `configures`, `documents`, `deploys`, `migrates`, `triggers`, `defines_schema`, `serves`, `provisions`, `routes`, `related`.
+
+### Edge Weight Conventions (file-analyzer)
 | Edge Type | Weight |
 |---|---|
-| `contains` | 1.0 |
-| `inherits`, `implements` | 0.9 |
-| `calls`, `exports`, `defines_schema` | 0.8 |
+| `defines_schema` | 0.8 |
 | `imports`, `deploys`, `migrates` | 0.7 |
 | `depends_on`, `configures`, `triggers` | 0.6 |
-| `tested_by`, `documents`, `provisions`, `serves`, `routes` | 0.5 |
-| All others | 0.5 (default) |
+| `tested_by`, `documents`, `provisions`, `serves`, `routes`, `related` | 0.5 |

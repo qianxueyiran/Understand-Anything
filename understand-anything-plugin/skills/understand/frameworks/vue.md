@@ -27,7 +27,7 @@ When analyzing a Vue project, apply these additional conventions on top of the b
 
 ### Edge Patterns to Look For
 
-**Component parent-child** — When a parent component uses a child component in its `<template>`, create `contains` edges from the parent to the child. Template refs and slot usage further indicate composition relationships.
+**Component parent-child** — When a parent component file uses a child component from another project file in its `<template>`, create a `depends_on` edge from the parent file to the child file. Do not create component symbol nodes.
 
 **Composable usage** — When a component or composable imports and calls a `useX` function, create `depends_on` edges from the consumer to the composable module. Composables are the primary mechanism for shared stateful logic.
 

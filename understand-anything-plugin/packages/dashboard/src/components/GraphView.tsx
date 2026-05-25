@@ -23,7 +23,7 @@ import type { PortalFlowNode } from "./PortalNode";
 import ContainerNode from "./ContainerNode";
 import type { ContainerFlowNode, ContainerNodeData } from "./ContainerNode";
 import Breadcrumb from "./Breadcrumb";
-import { useDashboardStore } from "../store";
+import { FLAT_LAYER_ID, useDashboardStore } from "../store";
 import type {
   GraphEdge,
   GraphNode,
@@ -358,7 +358,7 @@ const EMPTY_TOPOLOGY: LayerDetailTopology = {
  * Topology hook: derives containers, aggregates inter-container edges, then
  * runs Stage 1 ELK on container atoms (no children rendered yet — Task 12
  * lazy-expands them). Only recomputes when the graph structure, active
- * layer, persona, diff state, focus, or filters change. Does NOT depend on
+ * layer, diff state, focus, or filters change. Does NOT depend on
  * selectedNodeId, searchResults, tourHighlightedNodeIds, or
  * expandedContainers (Stage 2 concern).
  */
@@ -366,18 +366,14 @@ function useLayerDetailTopology(): LayerDetailTopology & {
   layoutStatus: "computing" | "ready";
 } {
   const graph = useDashboardStore((s) => s.graph);
-  const nodesById = useDashboardStore((s) => s.nodesById);
   const activeLayerId = useDashboardStore((s) => s.activeLayerId);
   const selectNode = useDashboardStore((s) => s.selectNode);
-  const persona = useDashboardStore((s) => s.persona);
   const diffMode = useDashboardStore((s) => s.diffMode);
   const changedNodeIds = useDashboardStore((s) => s.changedNodeIds);
   const affectedNodeIds = useDashboardStore((s) => s.affectedNodeIds);
   const focusNodeId = useDashboardStore((s) => s.focusNodeId);
   const nodeTypeFilters = useDashboardStore((s) => s.nodeTypeFilters);
   const drillIntoLayer = useDashboardStore((s) => s.drillIntoLayer);
-  const detailLevel = useDashboardStore((s) => s.detailLevel);
-  const showFunctionsInClassView = useDashboardStore((s) => s.showFunctionsInClassView);
 
   const handleNodeSelect = useCallback(
     (nodeId: string) => {
@@ -400,43 +396,32 @@ function useLayerDetailTopology(): LayerDetailTopology & {
   const built = useMemo(() => {
     if (!graph || !activeLayerId) return null;
 
-    const activeLayer = graph.layers.find((l) => l.id === activeLayerId);
-    if (!activeLayer) return null;
+    const layers = graph.layers ?? [];
+    const activeLayer = layers.find((l) => l.id === activeLayerId);
 
-    const layerNodeIds = new Set(activeLayer.nodeIds);
-
-    // Expand layer membership to include sub-file nodes (function/class)
-    // whose parent file is in this layer. Joined via "contains" edges.
-    // File view: file nodes only (architecture-level dependencies).
-    // Class view: file nodes + class nodes, functions only when toggle is on.
-    const expandedLayerNodeIds = new Set(layerNodeIds);
-    if (detailLevel !== "file") {
-      for (const edge of graph.edges) {
-        if (edge.type === "contains" && layerNodeIds.has(edge.source)) {
-          const child = nodesById.get(edge.target);
-          if (!child) continue;
-          if (child.type === "class") {
-            expandedLayerNodeIds.add(edge.target);
-          } else if (child.type === "function" && showFunctionsInClassView) {
-            expandedLayerNodeIds.add(edge.target);
-          }
-        }
-      }
-    }
-
-    const subFileTypes = new Set(["function", "class"]);
     const allVisibleTypes = new Set([
       "file", "module", "concept",
       "config", "document", "service", "table",
       "endpoint", "pipeline", "schema", "resource",
       "domain", "flow", "step",
-      "function", "class",
     ]);
 
+    let layerNodeIds: Set<string>;
+    if (activeLayerId === FLAT_LAYER_ID || (!activeLayer && layers.length === 0)) {
+      layerNodeIds = new Set(
+        graph.nodes
+          .filter((n) => allVisibleTypes.has(n.type))
+          .map((n) => n.id),
+      );
+    } else if (!activeLayer) {
+      return null;
+    } else {
+      layerNodeIds = new Set(activeLayer.nodeIds);
+    }
+
     let filteredGraphNodes = graph.nodes.filter((n) => {
-      if (!expandedLayerNodeIds.has(n.id)) return false;
+      if (!layerNodeIds.has(n.id)) return false;
       if (!allVisibleTypes.has(n.type)) return false;
-      if (persona === "non-technical" && subFileTypes.has(n.type)) return false;
       return true;
     });
 
@@ -586,7 +571,7 @@ function useLayerDetailTopology(): LayerDetailTopology & {
 
     // Portal nodes for connected external layers (unchanged)
     const portals = computePortals(graph, activeLayerId);
-    const layerIndexMap = new Map(graph.layers.map((l, i) => [l.id, i]));
+    const layerIndexMap = new Map((graph.layers ?? []).map((l, i) => [l.id, i]));
 
     const portalNodes: PortalFlowNode[] = portals.map((portal) => ({
       id: `portal:${portal.layerId}`,
@@ -639,17 +624,13 @@ function useLayerDetailTopology(): LayerDetailTopology & {
     };
   }, [
     graph,
-    nodesById,
     activeLayerId,
-    persona,
     diffMode,
     changedNodeIds,
     affectedNodeIds,
     focusNodeId,
     nodeTypeFilters,
     drillIntoLayer,
-    detailLevel,
-    showFunctionsInClassView,
     handleNodeSelect,
     handleContainerToggle,
   ]);

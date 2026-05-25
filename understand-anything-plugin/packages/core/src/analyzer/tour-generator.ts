@@ -5,7 +5,8 @@ import type { KnowledgeGraph, TourStep } from "../types.js";
  * Includes project metadata, node summaries, edges, and layer info.
  */
 export function buildTourGenerationPrompt(graph: KnowledgeGraph): string {
-  const { project, nodes, edges, layers } = graph;
+  const { project, nodes, edges } = graph;
+  const layers = graph.layers ?? [];
 
   const nodeList = nodes
     .map(
@@ -133,7 +134,8 @@ export function parseTourGenerationResponse(response: string): TourStep[] {
  * 8. Assign sequential order numbers
  */
 export function generateHeuristicTour(graph: KnowledgeGraph): TourStep[] {
-  const { nodes, edges, layers } = graph;
+  const { nodes, edges } = graph;
+  const layers = graph.layers ?? [];
 
   // Separate concept nodes from code nodes
   const conceptNodes = nodes.filter((n) => n.type === "concept");

@@ -322,19 +322,19 @@ describe("sanitizeGraph", () => {
     expect(edge.direction).toBe("forward");
   });
 
-  it("converts null tour/layers to empty arrays", () => {
+  it("omits null or empty tour/layers keys", () => {
     const graph = structuredClone(validGraph);
     (graph as any).tour = null;
     (graph as any).layers = null;
 
     const result = sanitizeGraph(graph as any);
-    expect((result as any).tour).toEqual([]);
-    expect((result as any).layers).toEqual([]);
+    expect((result as any).tour).toBeUndefined();
+    expect((result as any).layers).toBeUndefined();
   });
 
   it("converts null optional tour step fields to undefined", () => {
     const graph = structuredClone(validGraph);
-    (graph.tour[0] as any).languageLesson = null;
+    (graph.tour![0] as any).languageLesson = null;
 
     const result = sanitizeGraph(graph as any);
     expect((result as any).tour[0].languageLesson).toBeUndefined();
@@ -573,20 +573,20 @@ describe("permissive validation", () => {
 
   it("filters dangling nodeIds from layers", () => {
     const graph = structuredClone(validGraph);
-    graph.layers[0].nodeIds.push("non-existent-node");
+    graph.layers![0].nodeIds.push("non-existent-node");
 
     const result = validateGraph(graph);
     expect(result.success).toBe(true);
-    expect(result.data!.layers[0].nodeIds).toEqual(["node-1"]);
+    expect(result.data!.layers![0].nodeIds).toEqual(["node-1"]);
   });
 
   it("filters dangling nodeIds from tour steps", () => {
     const graph = structuredClone(validGraph);
-    graph.tour[0].nodeIds.push("non-existent-node");
+    graph.tour![0].nodeIds.push("non-existent-node");
 
     const result = validateGraph(graph);
     expect(result.success).toBe(true);
-    expect(result.data!.tour[0].nodeIds).toEqual(["node-1"]);
+    expect(result.data!.tour![0].nodeIds).toEqual(["node-1"]);
   });
 
   it("returns empty issues array for a perfect graph", () => {

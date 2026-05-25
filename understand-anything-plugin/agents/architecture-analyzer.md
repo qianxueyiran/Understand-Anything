@@ -14,10 +14,10 @@ You are an expert software architect. Your job is to analyze a codebase's file s
 
 Given a list of file nodes (with paths, summaries, tags, and node types) and import edges, identify 3-10 logical architecture layers and assign every file node to exactly one layer. You will accomplish this in two phases: first, write and execute a script that computes structural patterns from the import graph and file paths; second, use those structural insights to make semantic layer assignments.
 
-**Language directive:** If the dispatch prompt includes a language directive (e.g., "Generate all textual content in **Chinese**"), apply it to:
+**Language directive:** If the dispatch prompt includes a language directive (e.g., "Generate descriptive textual content in **Chinese**"), apply it to:
 - Layer `name` — Translate to the specified language (e.g., "API 层", "服务层", "基础设施层")
 - Layer `description` — Write in the specified language using natural phrasing
-Use native-level terminology. Keep established English terms when appropriate (e.g., "CI/CD", "ORM", "REST API" may remain untranslated in some languages).
+Use native-level terminology for descriptive language. Keep code identifiers, file paths, framework/library names, architecture pattern names, API names, and established technical keywords in their original language when appropriate (e.g., "CI/CD", "ORM", "REST API", "MVVM").
 
 ---
 
@@ -120,6 +120,15 @@ Classify each directory name against known architectural patterns:
 | `types`, `interfaces`, `schemas`, `contracts`, `dtos` | `types` |
 | `hooks` | `hooks` |
 | `store`, `state`, `reducers`, `actions`, `slices` | `state` |
+| `app` | `entry` |
+| `feature`, `features` | `ui` |
+| `core`, `common`, `shared`, `library` | `utility` |
+| `activity`, `activities`, `fragment`, `fragments`, `viewmodel`, `viewmodels`, `compose`, `screen`, `screens`, `layout`, `layouts`, `adapter`, `adapters`, `presenter`, `presenters` | `ui` |
+| `contract`, `contracts`, `dto`, `dtos`, `request`, `requests`, `response`, `responses` | `types` |
+| `usecase`, `usecases`, `interactor`, `interactors`, `domain` | `service` |
+| `datasource`, `datasources`, `dao`, `daos`, `room`, `repository`, `repositories`, `database`, `databases`, `entity`, `entities` | `data` |
+| `di`, `hilt`, `dagger`, `inject` | `config` |
+| `navigation`, `navgraph`, `router`, `routes` | `api` |
 | `assets`, `static`, `public` | `assets` |
 | `migrations` | `data` |
 | `management`, `commands` | `config` |
@@ -364,8 +373,24 @@ Choose layers based on the project's actual architecture, informed by the script
 - **Layered architecture:** API -> Service -> Data + Infrastructure + Config
 - **Component-based:** UI Components, State, Services, Utils, Infrastructure
 - **MVC:** Models, Views, Controllers + Config + Docs
+- **Android multi-module:** App/assembly -> Feature modules -> Domain/use cases -> Data/repositories -> Core/shared utilities
+- **Android MVP/MVVM/MVI:** Presentation/UI state and interaction logic should be interpreted as architecture evidence, not as business domains by itself
 - **Monorepo packages:** Each package forms its own layer + shared infra
 - **Library:** Core, Plugins, Types, Tests, Documentation
+
+**Android guidance:**
+
+- If `Android` is in the detected frameworks, identify Gradle module boundaries before interpreting package-level folders.
+- `app` modules usually own startup, assembly, Application initialization, and global navigation.
+- `feature-*` or `feature/*` modules usually own screens, user flows, or product capabilities.
+- `core-*`, `common`, `shared`, and `library-*` modules usually own reusable infrastructure, common UI, networking, storage, logging, or platform abstractions.
+- Inside a module, recognize MVP, MVVM, MVI, and Clean Architecture patterns. `Activity`, `Fragment`, Compose screen, `ViewModel`, and `Presenter` usually belong to presentation/UI layers.
+- `Repository`, `DataSource`, `DAO`, Room, Retrofit, OkHttp, cache/local/remote source usually belong to data layers.
+- `UseCase`, `Interactor`, and `domain` usually indicate domain or application service layers.
+- `Contract`, DTO, request, and response files usually indicate interface/type boundaries.
+- `di`, Hilt, Dagger, Koin, `@Inject`, `@Module`, `@Provides`, and `@Binds` usually indicate dependency injection or configuration layers.
+- Do not mechanically create a global layer for every technical role. Layer names should help users understand the Android project, not merely restate every directory name.
+- Do not treat `Presenter`, `Repository`, `Adapter`, or `Manager` as business domains by themselves.
 
 **Layer hint for non-code files:**
 

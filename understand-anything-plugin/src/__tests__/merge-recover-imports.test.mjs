@@ -166,6 +166,41 @@ describe("merge-batch-graphs.py imports recovery", () => {
     expect(stderr).toContain("importMap recovery skipped — scan-result.json not found");
   });
 
+  it("recovers external imports edges for shard candidate graphs", () => {
+    writeFileSync(
+      join(intermediateDir, "scan-result.json"),
+      JSON.stringify({
+        importMap: { "src/a.py": ["src/outside.py"] },
+      }),
+    );
+    const candidateDir = join(projectRoot, ".understand-anything", "intermediate", "sharded", "home");
+    mkdirSync(candidateDir, { recursive: true });
+    const candidatePath = join(candidateDir, "candidate-shard.json");
+    writeFileSync(
+      candidatePath,
+      JSON.stringify({
+        nodes: [fileNode("src/a.py")],
+        edges: [],
+      }),
+    );
+
+    const result = spawnSync(
+      "python3",
+      [MERGE_SCRIPT, projectRoot, "--import-recovery-only", "--graph", candidatePath],
+      { encoding: "utf-8" },
+    );
+    expect(result.status).toBe(0);
+
+    const assembled = JSON.parse(readFileSync(candidatePath, "utf-8"));
+    const edge = assembled.edges.find((item) => item.type === "imports");
+    expect(edge).toMatchObject({
+      source: "file:src/a.py",
+      target: "file:src/outside.py",
+      external: true,
+      recoveredFromImportMap: true,
+    });
+  });
+
   it("never produces self-import edges", () => {
     writeFileSync(
       join(intermediateDir, "batch-0.json"),

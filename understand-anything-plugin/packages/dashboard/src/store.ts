@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import type { ProductIndex } from "@understand-anything/core/product-index";
 import { SearchEngine } from "@understand-anything/core/search";
 import type { SearchResult } from "@understand-anything/core/search";
 import type { GraphIssue } from "@understand-anything/core/schema";
@@ -11,11 +12,13 @@ import type { ReactFlowInstance } from "@xyflow/react";
 
 export type Persona = "non-technical" | "junior" | "experienced";
 export type NavigationLevel = "overview" | "layer-detail";
+
+/** Sentinel layer id when the graph has no architecture layers — show all file-level nodes. */
+export const FLAT_LAYER_ID = "__flat__";
 export type NodeType = "file" | "function" | "class" | "module" | "concept" | "config" | "document" | "service" | "table" | "endpoint" | "pipeline" | "schema" | "resource" | "domain" | "flow" | "step" | "article" | "entity" | "topic" | "claim" | "source";
 export type Complexity = "simple" | "moderate" | "complex";
 export type EdgeCategory = "structural" | "behavioral" | "data-flow" | "dependencies" | "semantic" | "infrastructure" | "domain" | "knowledge";
 export type ViewMode = "structural" | "domain" | "knowledge";
-export type DetailLevel = "file" | "class";
 
 export interface FilterState {
   nodeTypes: Set<NodeType>;
@@ -80,7 +83,7 @@ function buildGraphIndexes(graph: KnowledgeGraph): {
   for (const node of graph.nodes) nodesById.set(node.id, node);
   const nodeIdToLayerId = new Map<string, string>();
   const nodeIdToLayerIds = new Map<string, Set<string>>();
-  for (const layer of graph.layers) {
+  for (const layer of graph.layers ?? []) {
     for (const nid of layer.nodeIds) {
       if (!nodeIdToLayerId.has(nid)) nodeIdToLayerId.set(nid, layer.id);
       let set = nodeIdToLayerIds.get(nid);
@@ -99,6 +102,7 @@ const MAX_HISTORY = 50;
 
 interface DashboardStore {
   graph: KnowledgeGraph | null;
+  productIndex: ProductIndex | null;
   /** id → node lookup, rebuilt by setGraph. Empty before any graph loads. */
   nodesById: Map<string, GraphNode>;
   /** id → layer id (first-matching-layer wins), rebuilt by setGraph. Empty before any graph loads. */
@@ -147,14 +151,8 @@ interface DashboardStore {
   nodeTypeFilters: Record<NodeCategory, boolean>;
   toggleNodeTypeFilter: (category: NodeCategory) => void;
 
-  // Detail level: "file" shows only file nodes (architecture view),
-  // "class" shows files + class nodes (code structure view) with optional function expansion.
-  detailLevel: DetailLevel;
-  setDetailLevel: (level: DetailLevel) => void;
-  showFunctionsInClassView: boolean;
-  toggleShowFunctionsInClassView: () => void;
-
   setGraph: (graph: KnowledgeGraph) => void;
+  setProductIndex: (index: ProductIndex | null) => void;
   selectNode: (nodeId: string | null) => void;
   navigateToNode: (nodeId: string) => void;
   navigateToNodeInLayer: (nodeId: string) => void;
@@ -288,6 +286,7 @@ function layerResetIfChanged(
 
 export const useDashboardStore = create<DashboardStore>()((set, get) => ({
   graph: null,
+  productIndex: null,
   nodesById: new Map<string, GraphNode>(),
   nodeIdToLayerId: new Map<string, string>(),
   nodeIdToLayerIds: new Map<string, Set<string>>(),
@@ -339,29 +338,6 @@ export const useDashboardStore = create<DashboardStore>()((set, get) => ({
       pendingFocusContainer: null,
     })),
 
-  detailLevel: "file",
-  setDetailLevel: (level) =>
-    set({
-      detailLevel: level,
-      // Detail level changes which nodes are visible; cached positions stale.
-      // Reset fn toggle so it doesn't resurrect when re-entering class view.
-      showFunctionsInClassView: false,
-      containerLayoutCache: new Map(),
-      containerSizeMemory: new Map(),
-      expandedContainers: new Set(),
-      pendingFocusContainer: null,
-    }),
-
-  showFunctionsInClassView: false,
-  toggleShowFunctionsInClassView: () =>
-    set((state) => ({
-      showFunctionsInClassView: !state.showFunctionsInClassView,
-      containerLayoutCache: new Map(),
-      containerSizeMemory: new Map(),
-      expandedContainers: new Set(),
-      pendingFocusContainer: null,
-    })),
-
   setGraph: (graph) => {
     const searchEngine = new SearchEngine(graph.nodes);
     const query = get().searchQuery;
@@ -370,6 +346,7 @@ export const useDashboardStore = create<DashboardStore>()((set, get) => ({
     // Preserve domain view if a domain graph is already loaded
     const keepDomainView = viewMode === "domain" && domainGraph !== null;
     const { nodesById, nodeIdToLayerId, nodeIdToLayerIds } = buildGraphIndexes(graph);
+    const hasLayers = (graph.layers?.length ?? 0) > 0;
     set({
       graph,
       nodesById,
@@ -377,8 +354,8 @@ export const useDashboardStore = create<DashboardStore>()((set, get) => ({
       nodeIdToLayerIds,
       searchEngine,
       searchResults,
-      navigationLevel: "overview",
-      activeLayerId: null,
+      navigationLevel: hasLayers ? "overview" : "layer-detail",
+      activeLayerId: hasLayers ? null : FLAT_LAYER_ID,
       selectedNodeId: null,
       focusNodeId: null,
       nodeHistory: [],
@@ -392,6 +369,8 @@ export const useDashboardStore = create<DashboardStore>()((set, get) => ({
       layoutIssues: [],
     });
   },
+
+  setProductIndex: (index) => set({ productIndex: index }),
 
   selectNode: (nodeId) => {
     const { selectedNodeId, nodeHistory } = get();
@@ -489,10 +468,12 @@ export const useDashboardStore = create<DashboardStore>()((set, get) => ({
       pendingFocusContainer: null,
     }),
 
-  navigateToOverview: () =>
+  navigateToOverview: () => {
+    const graph = get().graph;
+    const hasLayers = (graph?.layers?.length ?? 0) > 0;
     set({
-      navigationLevel: "overview",
-      activeLayerId: null,
+      navigationLevel: hasLayers ? "overview" : "layer-detail",
+      activeLayerId: hasLayers ? null : FLAT_LAYER_ID,
       selectedNodeId: null,
       focusNodeId: null,
       codeViewerOpen: false,
@@ -502,7 +483,8 @@ export const useDashboardStore = create<DashboardStore>()((set, get) => ({
       containerSizeMemory: new Map(),
       expandedContainers: new Set(),
       pendingFocusContainer: null,
-    }),
+    });
+  },
 
   setFocusNode: (nodeId) =>
     set({
@@ -781,4 +763,3 @@ export const useDashboardStore = create<DashboardStore>()((set, get) => ({
     }),
   clearLayoutIssues: () => set({ layoutIssues: [] }),
 }));
-

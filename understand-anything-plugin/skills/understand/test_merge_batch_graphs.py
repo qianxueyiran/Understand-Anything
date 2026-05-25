@@ -823,6 +823,234 @@ class LinkTestsTests(unittest.TestCase):
 class MergeIntegrationTests(unittest.TestCase):
     """Verify the linker is wired into merge_and_normalize correctly."""
 
+    def test_full_mode_drops_dangling_edges(self) -> None:
+        batch = {
+            "nodes": [
+                _file_node("src/local.ts"),
+            ],
+            "edges": [
+                {
+                    "source": "file:src/local.ts",
+                    "target": "file:src/external.ts",
+                    "type": "imports",
+                    "direction": "forward",
+                    "weight": 0.7,
+                },
+            ],
+        }
+
+        assembled, report = mbg.merge_and_normalize([batch])
+
+        self.assertEqual(assembled["edges"], [])
+        self.assertTrue(
+            any("dropped, missing target" in line for line in report),
+            "\n".join(report),
+        )
+
+    def test_shard_mode_preserves_external_target_edges(self) -> None:
+        batch = {
+            "nodes": [
+                _file_node("src/local.ts"),
+            ],
+            "edges": [
+                {
+                    "source": "file:src/local.ts",
+                    "target": "file:src/external.ts",
+                    "type": "imports",
+                    "direction": "forward",
+                    "weight": 0.7,
+                },
+            ],
+        }
+
+        assembled, report = mbg.merge_and_normalize([batch], preserve_external=True)
+
+        self.assertEqual(len(assembled["edges"]), 1)
+        edge = assembled["edges"][0]
+        self.assertEqual(edge["target"], "file:src/external.ts")
+        self.assertTrue(edge["external"])
+        self.assertNotIn("externalReason", edge)
+        self.assertTrue(
+            any("external edges preserved" in line for line in report),
+            "\n".join(report),
+        )
+
+    def test_shard_mode_drops_edges_with_empty_endpoints(self) -> None:
+        batch = {
+            "nodes": [
+                _file_node("src/local.ts"),
+            ],
+            "edges": [
+                {
+                    "source": "",
+                    "target": "file:src/external.ts",
+                    "type": "imports",
+                    "direction": "forward",
+                    "weight": 0.7,
+                },
+                {
+                    "source": "file:src/local.ts",
+                    "target": "",
+                    "type": "imports",
+                    "direction": "forward",
+                    "weight": 0.7,
+                },
+            ],
+        }
+
+        assembled, report = mbg.merge_and_normalize([batch], preserve_external=True)
+
+        self.assertEqual(assembled["edges"], [])
+        self.assertFalse(
+            any("external edges preserved" in line for line in report),
+            "\n".join(report),
+        )
+        self.assertTrue(
+            any("dropped, missing source" in line for line in report),
+            "\n".join(report),
+        )
+        self.assertTrue(
+            any("dropped, missing target" in line for line in report),
+            "\n".join(report),
+        )
+
+    def test_full_mode_strips_existing_external_markers_from_edges(self) -> None:
+        batch = {
+            "nodes": [
+                _file_node("src/local.ts"),
+                _file_node("src/target.ts"),
+            ],
+            "edges": [
+                {
+                    "source": "file:src/local.ts",
+                    "target": "file:src/target.ts",
+                    "type": "imports",
+                    "direction": "forward",
+                    "weight": 0.7,
+                    "external": True,
+                    "externalReason": "stale marker",
+                },
+            ],
+        }
+
+        assembled, _report = mbg.merge_and_normalize([batch])
+
+        self.assertEqual(len(assembled["edges"]), 1)
+        edge = assembled["edges"][0]
+        self.assertNotIn("external", edge)
+        self.assertNotIn("externalReason", edge)
+
+    def test_external_edge_report_counts_deduped_output_edges(self) -> None:
+        batch = {
+            "nodes": [
+                _file_node("src/local.ts"),
+            ],
+            "edges": [
+                {
+                    "source": "file:src/local.ts",
+                    "target": "file:src/external.ts",
+                    "type": "imports",
+                    "direction": "forward",
+                    "weight": 0.5,
+                },
+                {
+                    "source": "file:src/local.ts",
+                    "target": "file:src/external.ts",
+                    "type": "imports",
+                    "direction": "forward",
+                    "weight": 0.9,
+                },
+            ],
+        }
+
+        assembled, report = mbg.merge_and_normalize([batch], preserve_external=True)
+
+        self.assertEqual(len(assembled["edges"]), 1)
+        self.assertTrue(assembled["edges"][0]["external"])
+        self.assertTrue(
+            any("   1 × external edges preserved for shard mode" in line for line in report),
+            "\n".join(report),
+        )
+
+    def test_is_shard_merge_output_detects_shard_paths(self) -> None:
+        self.assertTrue(
+            mbg.is_shard_merge_output(
+                Path("/proj/.understand-anything/shards/home.json"),
+            ),
+        )
+        self.assertTrue(
+            mbg.is_shard_merge_output(
+                Path("/proj/.understand-anything/intermediate/sharded/home/candidate-shard.json"),
+            ),
+        )
+        self.assertFalse(
+            mbg.is_shard_merge_output(
+                Path("/proj/.understand-anything/intermediate/assembled-graph.json"),
+            ),
+        )
+
+    def test_cli_accepts_import_recovery_only_flag(self) -> None:
+        args = mbg.parse_args(
+            [
+                "/tmp/project",
+                "--import-recovery-only",
+                "--graph",
+                "/tmp/project/.understand-anything/intermediate/sharded/home/candidate-shard.json",
+            ],
+        )
+
+        self.assertEqual(args.project_root, "/tmp/project")
+        self.assertTrue(args.import_recovery_only)
+        self.assertEqual(
+            args.graph,
+            "/tmp/project/.understand-anything/intermediate/sharded/home/candidate-shard.json",
+        )
+
+    def test_cli_accepts_custom_intermediate_and_output_paths(self) -> None:
+        args = mbg.parse_args(
+            [
+                "/tmp/project",
+                "--intermediate-dir",
+                "/tmp/project/.understand-anything/intermediate/sharded/home",
+                "--output",
+                "/tmp/project/.understand-anything/intermediate/sharded/home/assembled-graph.json",
+            ]
+        )
+
+        self.assertEqual(args.project_root, "/tmp/project")
+        self.assertEqual(
+            args.intermediate_dir,
+            "/tmp/project/.understand-anything/intermediate/sharded/home",
+        )
+        self.assertEqual(
+            args.output,
+            "/tmp/project/.understand-anything/intermediate/sharded/home/assembled-graph.json",
+        )
+
+    def test_cli_defaults_keep_existing_intermediate_and_output_behavior(self) -> None:
+        args = mbg.parse_args(["/tmp/project"])
+
+        self.assertIsNone(args.intermediate_dir)
+        self.assertIsNone(args.output)
+        self.assertFalse(args.preserve_external)
+
+    def test_cli_accepts_preserve_external_flag(self) -> None:
+        args = mbg.parse_args(["/tmp/project", "--preserve-external"])
+        self.assertTrue(args.preserve_external)
+
+    def test_cli_accepts_allow_external_edges_alias(self) -> None:
+        args = mbg.parse_args(["/tmp/project", "--allow-external-edges"])
+        self.assertTrue(args.preserve_external)
+
+    def test_resolve_preserve_external_cli_overrides_non_shard_output(self) -> None:
+        output = Path("/tmp/project/.understand-anything/intermediate/assembled-graph.json")
+        self.assertTrue(
+            mbg.resolve_preserve_external(cli_flag=True, output_path=output),
+        )
+        self.assertFalse(
+            mbg.resolve_preserve_external(cli_flag=False, output_path=output),
+        )
+
     def test_linker_runs_during_merge(self) -> None:
         batch = {
             "nodes": [
@@ -868,6 +1096,146 @@ class MergeIntegrationTests(unittest.TestCase):
         # Production node tagged
         prod_node = next(n for n in assembled["nodes"] if n["id"] == "file:src/foo.ts")
         self.assertIn("tested", prod_node["tags"])
+
+
+class BusinessSignalMergeTests(unittest.TestCase):
+    def test_dedupes_and_caps_business_signals(self):
+        node = {
+            "id": "file:src/HomeActivity.kt",
+            "type": "file",
+            "name": "HomeActivity.kt",
+            "filePath": "src/HomeActivity.kt",
+            "summary": "Home entry.",
+            "tags": [],
+            "complexity": "simple",
+            "businessSignals": [
+                {"type": "entry", "text": "标准首页入口"},
+                {"type": "entry", "text": "标准首页入口"},
+                {"type": "display", "text": "首页退出确认弹窗"},
+                {"type": "bad", "text": "错误类型"},
+                {"type": "data", "text": ""},
+                {"type": "behavior", "text": "首页初始化"},
+                {"type": "rule", "text": "退出拦截策略"},
+                {"type": "integration", "text": "外部路由调起"},
+                {"type": "data", "text": "首页数据请求"},
+                {"type": "display", "text": "首页顶部导航展示"},
+                {"type": "behavior", "text": "首页推荐内容加载"},
+            ],
+        }
+
+        assembled, report = mbg.merge_and_normalize([{"nodes": [node], "edges": []}])
+        merged = assembled["nodes"][0]
+
+        self.assertEqual(len(merged["businessSignals"]), 8)
+        self.assertEqual(
+            merged["businessSignals"][0],
+            {"type": "entry", "text": "标准首页入口"},
+        )
+        self.assertEqual(
+            len({(s["type"], s["text"]) for s in merged["businessSignals"]}),
+            len(merged["businessSignals"]),
+        )
+        allowed_types = {"entry", "behavior", "rule", "display", "data", "integration"}
+        signal_pairs = {(s["type"], s["text"]) for s in merged["businessSignals"]}
+        self.assertTrue(all(s["type"] in allowed_types for s in merged["businessSignals"]))
+        self.assertTrue(all(s["text"] for s in merged["businessSignals"]))
+        self.assertNotIn(("bad", "错误类型"), signal_pairs)
+        self.assertNotIn("", {s["text"] for s in merged["businessSignals"]})
+        self.assertTrue(any("businessSignals" in line for line in report))
+
+    def test_drops_unhashable_type_and_dedupes_after_text_truncation(self):
+        prefix = "业务流程" * 10
+        self.assertEqual(len(prefix), 40)
+        shared_prefix = prefix * 2
+        self.assertEqual(len(shared_prefix), 80)
+        node = {
+            "id": "file:src/HomeActivity.kt",
+            "type": "file",
+            "name": "HomeActivity.kt",
+            "filePath": "src/HomeActivity.kt",
+            "summary": "Home entry.",
+            "tags": [],
+            "complexity": "simple",
+            "businessSignals": [
+                {"type": [], "text": "不可哈希类型"},
+                {"type": "display", "text": f"{shared_prefix}甲"},
+                {"type": "display", "text": f"{shared_prefix}乙"},
+            ],
+        }
+
+        assembled, _report = mbg.merge_and_normalize([{"nodes": [node], "edges": []}])
+        signals = assembled["nodes"][0]["businessSignals"]
+
+        self.assertEqual(signals, [{"type": "display", "text": shared_prefix}])
+
+
+class StripSymbolGraphTests(unittest.TestCase):
+    """File-only graph: remove function/class nodes and symbol edges."""
+
+    def test_strips_function_class_nodes_and_symbol_edges(self) -> None:
+        nodes = [
+            _file_node("src/a.ts"),
+            _file_node("src/b.ts"),
+            {
+                "id": "function:src/a.ts:run",
+                "type": "function",
+                "name": "run",
+                "filePath": "src/a.ts",
+                "summary": "Runs",
+                "tags": ["core"],
+                "complexity": "simple",
+            },
+            {
+                "id": "class:src/b.ts:Worker",
+                "type": "class",
+                "name": "Worker",
+                "filePath": "src/b.ts",
+                "summary": "Worker",
+                "tags": ["core"],
+                "complexity": "moderate",
+            },
+        ]
+        edges = [
+            {"source": "file:src/a.ts", "target": "file:src/b.ts", "type": "imports", "direction": "forward", "weight": 0.7},
+            {"source": "file:src/a.ts", "target": "function:src/a.ts:run", "type": "contains", "direction": "forward", "weight": 1.0},
+            {"source": "file:src/b.ts", "target": "class:src/b.ts:Worker", "type": "exports", "direction": "forward", "weight": 0.8},
+            {"source": "function:src/a.ts:run", "target": "function:src/b.ts:Worker", "type": "calls", "direction": "forward", "weight": 0.8},
+        ]
+
+        stripped_nodes, stripped_edges, stats = mbg.strip_symbol_graph(nodes, edges)
+
+        self.assertEqual({n["type"] for n in stripped_nodes}, {"file"})
+        self.assertEqual(len(stripped_nodes), 2)
+        self.assertEqual(len(stripped_edges), 1)
+        self.assertEqual(stripped_edges[0]["type"], "imports")
+        self.assertEqual(stats["nodes_removed"], 2)
+        self.assertEqual(stats["edges_removed"], 3)
+
+    def test_merge_and_normalize_applies_symbol_strip(self) -> None:
+        batches = [{
+            "nodes": [
+                _file_node("src/a.ts"),
+                {
+                    "id": "function:src/a.ts:run",
+                    "type": "function",
+                    "name": "run",
+                    "filePath": "src/a.ts",
+                    "summary": "Runs",
+                    "tags": ["core"],
+                    "complexity": "simple",
+                },
+            ],
+            "edges": [
+                {"source": "file:src/a.ts", "target": "function:src/a.ts:run", "type": "contains", "direction": "forward", "weight": 1.0},
+            ],
+        }]
+
+        assembled, report = mbg.merge_and_normalize(batches)
+        types = {n["type"] for n in assembled["nodes"]}
+        self.assertEqual(types, {"file"})
+        self.assertEqual(assembled["edges"], [])
+        joined = "\n".join(report)
+        self.assertIn("Symbol slim", joined)
 
 
 if __name__ == "__main__":

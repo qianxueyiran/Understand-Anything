@@ -21,6 +21,14 @@
       "types": "./dist/schema.d.ts",
       "default": "./dist/schema.js"
     },
+    "./product-index": {
+      "types": "./dist/product-index.d.ts",
+      "default": "./dist/product-index.js"
+    },
+    "./sharded-manifest": {
+      "types": "./dist/sharded-manifest.d.ts",
+      "default": "./dist/sharded-manifest.js"
+    },
     "./languages": {
       "types": "./dist/languages/index.d.ts",
       "default": "./dist/languages/index.js"
@@ -37,6 +45,7 @@
     "vitest": "^3.1.0"
   },
   "dependencies": {
+    "@tree-sitter-grammars/tree-sitter-kotlin": "1.1.0",
     "fuse.js": "^7.1.0",
     "ignore": "^7.0.5",
     "tree-sitter-c-sharp": "^0.23.1",

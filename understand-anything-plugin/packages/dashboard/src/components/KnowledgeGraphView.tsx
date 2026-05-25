@@ -58,7 +58,7 @@ function computeLayout(
   }
 
   const communityMap = new Map<string, number>();
-  graph.layers.forEach((layer, i) => {
+  (graph.layers ?? []).forEach((layer, i) => {
     for (const nodeId of layer.nodeIds) {
       communityMap.set(nodeId, i);
     }
