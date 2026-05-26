@@ -42,6 +42,10 @@ const graph: KnowledgeGraph = {
       summary: "播放页文件。",
       tags: ["activity", "player"],
       complexity: "simple",
+      businessSignals: [
+        { type: "entry", text: "播放页入口" },
+        { type: "behavior", text: "播放页提供投屏入口" },
+      ],
     },
   ],
   edges: [
@@ -93,9 +97,9 @@ function writeCodeShard(shardId: string, nextGraph: KnowledgeGraph = graph): voi
   );
 }
 
-function readSignals(): Array<{ filePath?: string; nodeId: string }> {
+function readShardSignals(shardId: string): Array<{ filePath?: string; nodeId: string }> {
   const content = readFileSync(
-    join(testRoot, ".understand-anything", "product-signals.jsonl"),
+    join(testRoot, ".understand-anything", "product-shards", `${shardId}.signals.jsonl`),
     "utf-8",
   ).trim();
   return content
@@ -120,33 +124,15 @@ describe("product-index CLI", () => {
     }
   });
 
-  it("prepares boundary candidates without product-index.json", async () => {
-    const result = await runProductIndexCli([
-      testRoot,
-      "--platform",
-      "android",
-      "--prepare-candidates",
-    ]);
-    expect(result.productIndexPath.endsWith("product-index.json")).toBe(true);
-    expect(
-      existsSync(join(testRoot, ".understand-anything", "product-index.json")),
-    ).toBe(false);
-    expect(
-      existsSync(join(testRoot, ".understand-anything", "product-signals.jsonl")),
-    ).toBe(true);
-
-    const raw = JSON.parse(
-      readFileSync(
-        join(
-          testRoot,
-          ".understand-anything",
-          "intermediate",
-          "product-boundary-candidates.json",
-        ),
-        "utf-8",
-      ),
-    ) as unknown[];
-    expect(raw.length).toBeGreaterThan(0);
+  it("rejects non-shard product generation stages", async () => {
+    await expect(
+      runProductIndexCli([
+        testRoot,
+        "--platform",
+        "android",
+        "--prepare-candidates",
+      ]),
+    ).rejects.toThrow(/shard-only.*--shard <id>.*--refresh-shards/s);
   });
 
   it("prepares candidates for a product shard without writing the root product index", async () => {
@@ -349,11 +335,14 @@ describe("product-index CLI", () => {
     writeCodeShard("home", {
       ...graph,
       nodes: [
+        graph.nodes[0],
         {
-          ...graph.nodes[0],
-          businessSignals: [{ type: "behavior", text: "播放页提供投屏入口" }],
+          ...graph.nodes[1],
+          businessSignals: [
+            { type: "entry", text: "播放页入口" },
+            { type: "behavior", text: "播放页提供投屏入口" },
+          ],
         },
-        graph.nodes[1],
       ],
     });
     writeJson(
@@ -532,19 +521,27 @@ describe("product-index CLI", () => {
     }
   });
 
-  it("writes project-relative signal paths for in-project absolute file paths", async () => {
+  it("writes project-relative signal paths for in-project absolute file paths in shard mode", async () => {
     const filePath = resolve(testRoot, "player/PlayerActivity.kt");
-    writeGraph({
+    writeShardedRoot("home");
+    writeCodeShard("home", {
       ...graph,
-      nodes: [{ ...graph.nodes[0], filePath }],
+      nodes: [{ ...graph.nodes[1], filePath }],
     });
 
-    await runProductIndexCli([testRoot, "--platform", "android", "--prepare-candidates"]);
+    await runProductIndexCli([
+      testRoot,
+      "--platform",
+      "android",
+      "--prepare-candidates",
+      "--shard",
+      "home",
+    ]);
 
-    expect(readSignals()[0].filePath).toBe("player/PlayerActivity.kt");
+    expect(readShardSignals("home")[0].filePath).toBe("player/PlayerActivity.kt");
   });
 
-  it("does not write unsafe signal file paths to the sidecar", async () => {
+  it("does not write unsafe signal file paths to the shard sidecar", async () => {
     const unsafePaths = [
       "/tmp/outside/PlayerActivity.kt",
       "/Users/private-user/outsideSecret/PlayerActivity.kt",
@@ -556,19 +553,27 @@ describe("product-index CLI", () => {
       "../outside/PlayerActivity.kt",
     ];
 
-    writeGraph({
+    writeShardedRoot("home");
+    writeCodeShard("home", {
       ...graph,
       nodes: unsafePaths.map((filePath, index) => ({
-        ...graph.nodes[0],
-        id: `class:unsafe-${index}:PlayerActivity`,
+        ...graph.nodes[1],
+        id: `file:unsafe-${index}.kt`,
         filePath,
       })),
     });
 
-    await runProductIndexCli([testRoot, "--platform", "android", "--prepare-candidates"]);
+    await runProductIndexCli([
+      testRoot,
+      "--platform",
+      "android",
+      "--prepare-candidates",
+      "--shard",
+      "home",
+    ]);
 
     const signalContent = readFileSync(
-      join(testRoot, ".understand-anything", "product-signals.jsonl"),
+      join(testRoot, ".understand-anything", "product-shards", "home.signals.jsonl"),
       "utf-8",
     );
     const candidatesContent = readFileSync(
@@ -576,6 +581,8 @@ describe("product-index CLI", () => {
         testRoot,
         ".understand-anything",
         "intermediate",
+        "product-shards",
+        "home",
         "product-boundary-candidates.json",
       ),
       "utf-8",
@@ -588,7 +595,7 @@ describe("product-index CLI", () => {
       expect(signalContent).not.toContain(sensitiveToken);
       expect(candidatesContent).not.toContain(sensitiveToken);
     }
-    expect(readSignals().every((signal) => signal.filePath === undefined)).toBe(
+    expect(readShardSignals("home").every((signal) => signal.filePath === undefined)).toBe(
       true,
     );
   });

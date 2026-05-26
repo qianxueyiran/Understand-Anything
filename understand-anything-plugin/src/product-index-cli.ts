@@ -9,9 +9,6 @@ import {
 import { dirname, isAbsolute, relative, resolve, join } from "node:path";
 import {
   buildProductSignals,
-  loadDomainGraph,
-  loadGraph,
-  saveProductIndex,
   type KnowledgeGraph,
   type ManifestUpdateMetadata,
   type ProductSignal,
@@ -25,6 +22,7 @@ import {
 import {
   buildProductBoundaryCandidates,
   buildTopicContextPacks,
+  toAnalyzerContextPack,
   finalizeGroundedProductIndex,
   normalizeLoadedContextPacks,
   type ProductBoundaryCandidate,
@@ -78,6 +76,12 @@ export async function runProductIndexCli(
       signals: 0,
       contextPacks: 0,
     };
+  }
+
+  if (!options.shardId) {
+    throw new Error(
+      "当前 /understand-product 正式流程是 shard-only。请使用 --shard <id> 生成 product shard，或使用 --refresh-shards 刷新 product-index.json manifest。",
+    );
   }
 
   const { graph, domainGraph } = loadProductGraphInputs(options, graphPath);
@@ -231,11 +235,7 @@ export async function runProductIndexCli(
       validationWarnings,
       warningsSink: finalizeWarnings,
     });
-    if (options.shardId) {
-      writeJson(getProductIndexPath(options.projectRoot, options.shardId), index);
-    } else {
-      saveProductIndex(options.projectRoot, index);
-    }
+    writeJson(getProductIndexPath(options.projectRoot, options.shardId), index);
 
     const tracePath = writeProductIndexTrace(
       options.projectRoot,
@@ -281,66 +281,49 @@ function loadProductGraphInputs(
     "knowledge-graph.json not found. 请先运行 /understand。",
   );
 
-  if (options.shardId) {
-    if (getTopLevelKind(rootGraph) !== "codebase-sharded") {
-      throw new Error("当前项目不是 sharded code graph。");
-    }
-
-    const shardGraphPath = join(
-      options.projectRoot,
-      ".understand-anything",
-      "shards",
-      `${options.shardId}.json`,
-    );
-    if (!existsSync(shardGraphPath)) {
-      throw new Error(
-        `${shardGraphPath} not found. 请先运行 /understand --scope ... --shard ${options.shardId}。`,
-      );
-    }
-
-    const rawGraph = readJsonFile<KnowledgeGraph>(
-      shardGraphPath,
-      `shards/${options.shardId}.json not found.`,
-    );
-    const domainShardPath = join(
-      options.projectRoot,
-      ".understand-anything",
-      "domain-shards",
-      `${options.shardId}.json`,
-    );
-    const rawDomainGraph = existsSync(domainShardPath)
-      ? readJsonFile<KnowledgeGraph>(
-          domainShardPath,
-          `domain-shards/${options.shardId}.json not found.`,
-        )
-      : undefined;
-
-    return {
-      graph: sanitiseKnowledgeGraphFilePaths(rawGraph, options.projectRoot),
-      domainGraph: rawDomainGraph
-        ? sanitiseKnowledgeGraphFilePaths(rawDomainGraph, options.projectRoot)
-        : undefined,
-    };
-  }
-
-  if (getTopLevelKind(rootGraph) === "codebase-sharded") {
+  if (!options.shardId) {
     throw new Error(
-      "当前项目是 sharded code graph。请使用 --shard <id> 处理单个 shard，或使用 --refresh-shards 刷新 product-index.json manifest。",
+      "Internal error: product shard generation requires --shard <id>.",
     );
   }
 
-  const loadedGraph = loadGraph(options.projectRoot);
-  if (!loadedGraph) {
-    throw new Error("Failed to load knowledge graph.");
+  if (getTopLevelKind(rootGraph) !== "codebase-sharded") {
+    throw new Error("当前项目不是 sharded code graph。");
   }
 
-  const loadedDomainGraph =
-    loadDomainGraph(options.projectRoot, { validate: false }) ?? undefined;
+  const shardGraphPath = join(
+    options.projectRoot,
+    ".understand-anything",
+    "shards",
+    `${options.shardId}.json`,
+  );
+  if (!existsSync(shardGraphPath)) {
+    throw new Error(
+      `${shardGraphPath} not found. 请先运行 /understand --scope ... --shard ${options.shardId}。`,
+    );
+  }
+
+  const rawGraph = readJsonFile<KnowledgeGraph>(
+    shardGraphPath,
+    `shards/${options.shardId}.json not found.`,
+  );
+  const domainShardPath = join(
+    options.projectRoot,
+    ".understand-anything",
+    "domain-shards",
+    `${options.shardId}.json`,
+  );
+  const rawDomainGraph = existsSync(domainShardPath)
+    ? readJsonFile<KnowledgeGraph>(
+        domainShardPath,
+        `domain-shards/${options.shardId}.json not found.`,
+      )
+    : undefined;
 
   return {
-    graph: sanitiseKnowledgeGraphFilePaths(loadedGraph, options.projectRoot),
-    domainGraph: loadedDomainGraph
-      ? sanitiseKnowledgeGraphFilePaths(loadedDomainGraph, options.projectRoot)
+    graph: sanitiseKnowledgeGraphFilePaths(rawGraph, options.projectRoot),
+    domainGraph: rawDomainGraph
+      ? sanitiseKnowledgeGraphFilePaths(rawDomainGraph, options.projectRoot)
       : undefined,
   };
 }
@@ -395,7 +378,7 @@ function writeTopicContextPackFiles(
   rmSync(outputDir, { recursive: true, force: true });
   mkdirSync(outputDir, { recursive: true });
   for (const pack of contextPacks) {
-    writeJson(join(outputDir, `${topicFileName(pack.topic.id)}.json`), pack);
+    writeJson(join(outputDir, `${topicFileName(pack.topic.id)}.json`), toAnalyzerContextPack(pack));
   }
 }
 
