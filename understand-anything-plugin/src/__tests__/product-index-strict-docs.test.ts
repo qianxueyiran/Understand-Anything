@@ -22,6 +22,18 @@ function skillPhase(title: string) {
 }
 
 describe("understand-product strict docs", () => {
+  it("documents shard-only product generation contract", () => {
+    expect(skill).toContain("正式流程是 shard-only");
+    expect(skill).toContain("/understand-product --shard <id>");
+    expect(skill).toContain("/understand-product --refresh-shards");
+    expect(skill).toContain("product-shards/<id>.json");
+    expect(skill).toContain("product-traces/<id>.json");
+    expect(skill).toContain("product-shards/<id>.signals.jsonl");
+    expect(skill).not.toContain("非 shard 模式");
+    expect(skill).not.toContain("product-index-trace.json");
+    expect(skill).not.toContain("product-signals.jsonl");
+  });
+
   it("documents strict phase order and removes fast fallback usage", () => {
     expect(skill).toContain("product-topic-normalizer.md");
     expect(skill).toContain("--prepare-candidates");
@@ -77,6 +89,9 @@ describe("understand-product strict docs", () => {
   it("requires topic normalization before context packs", () => {
     expect(normalizer).toContain("product-boundary-candidates.json");
     expect(normalizer).toContain("product-topic-normalization.json");
+    expect(normalizer).toContain("输入路径");
+    expect(normalizer).toContain("输出路径");
+    expect(normalizer).toContain("调度 prompt");
     expect(normalizer).toContain("`capability`");
     expect(normalizer).toContain("`surface`");
     expect(normalizer).toContain("`integration`");
@@ -94,13 +109,28 @@ describe("understand-product strict docs", () => {
     expect(analyzer).toContain("sourceReads");
     expect(analyzer).toContain("product-context-packs-by-topic/<topic-file>.json");
     expect(analyzer).toContain("product-index-extractions-by-topic/<topic-file>.json");
+    expect(analyzer).toContain("输入路径");
+    expect(analyzer).toContain("输出路径");
+    expect(analyzer).toContain("调度 prompt");
     expect(skill).toContain("逐个 topic 派发");
-    expect(analyzer).toContain("必须读取你认为与当前 topic 相关的 `candidateFiles[].filePath` 源码");
-    expect(analyzer).toContain("不能读取 `overflowFiles`");
+    expect(analyzer).toContain("读取你认为与当前 topic 相关的 `candidateFiles[].filePath` 源码");
+    expect(analyzer).toContain("只能读取当前 topic 的 `candidateFiles`");
     expect(analyzer).toContain("`behavior`、`rule`、`display`、`data`、`integration`、`mapping`、`lifecycle`");
     expect(analyzer).toContain("anchors[].signalType");
     expect(analyzer).toContain("禁止");
     expect(analyzer).not.toContain("`target`、`entry`");
     expect(analyzer).toContain("anchor:file:app/BootBroadcastReceiver.java:0");
+  });
+
+  it("passes explicit paths to product agents in shard mode", () => {
+    const phase2 = skillPhase("## Phase 2: LLM Topic Normalization");
+    const phase4 = skillPhase("## Phase 4: LLM Fact + Evidence Extraction");
+
+    expect(phase2).toContain("输入路径");
+    expect(phase2).toContain("输出路径");
+    expect(phase2).toContain("必须以调度 prompt 传入的路径为准");
+    expect(phase4).toContain("输入路径");
+    expect(phase4).toContain("输出路径");
+    expect(phase4).toContain("必须以调度 prompt 传入的路径为准");
   });
 });
