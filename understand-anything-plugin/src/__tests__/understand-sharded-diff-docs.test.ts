@@ -174,6 +174,10 @@ describe("understand sharded diff docs", () => {
       join(pluginRoot, "hooks", "auto-update-prompt.md"),
       "utf-8",
     );
+    const hookConfig = readFileSync(
+      join(pluginRoot, "hooks", "hooks.json"),
+      "utf-8",
+    );
 
     expect(hookPrompt).toContain("codebase-sharded");
     expect(hookPrompt).toContain("/understand --update-diff");
@@ -183,5 +187,9 @@ describe("understand sharded diff docs", () => {
     expect(hookPrompt).not.toContain("fingerprints.json");
     expect(hookPrompt).not.toContain("PARTIAL_UPDATE");
     expect(hookPrompt).not.toContain("FULL_UPDATE");
+    expect(hookConfig).toContain("codebase-sharded");
+    expect(hookConfig).toContain("knowledge-graph.json");
+    expect(hookConfig).toContain("update?.gitCommitHash");
+    expect(hookConfig).not.toContain("meta.json");
   });
 });

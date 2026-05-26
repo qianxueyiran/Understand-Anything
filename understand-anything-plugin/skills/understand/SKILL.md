@@ -239,7 +239,7 @@ Write validation results to `$PROJECT_ROOT/.understand-anything/intermediate/rev
    $PROJECT_ROOT/.understand-anything/fingerprints/shards/$SHARD_ID.json
    ```
 
-   Use the core fingerprint module where available; do not write a global `fingerprints.json`.
+   Use the core fingerprint module where available, and keep fingerprints shard-scoped.
 
 4. Clean up:
 
