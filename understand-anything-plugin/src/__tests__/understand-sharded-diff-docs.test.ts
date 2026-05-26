@@ -7,6 +7,24 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const pluginRoot = join(__dirname, "..", "..");
 
 describe("understand sharded diff docs", () => {
+  it("documents shard-only understand generation contract", () => {
+    const skill = readFileSync(
+      join(pluginRoot, "skills", "understand", "SKILL.md"),
+      "utf-8",
+    );
+
+    expect(skill).toContain("shard-only");
+    expect(skill).toContain("/understand --scope <paths> --shard <id>");
+    expect(skill).toContain("/understand --update-diff");
+    expect(skill).toContain('kind: "codebase-sharded"');
+    expect(skill).toContain("根 `knowledge-graph.json` 是 sharded manifest");
+    expect(skill).not.toContain("Existing non-sharded incremental update path");
+    expect(skill).not.toContain("Full analysis (all phases)");
+    expect(skill).not.toContain("Review-only path");
+    expect(skill).not.toContain("legacy non-sharded");
+    expect(skill).not.toContain("automatically launch the dashboard");
+  });
+
   it("documents update-diff and sharded decision logic", () => {
     const skill = readFileSync(
       join(pluginRoot, "skills", "understand", "SKILL.md"),
@@ -25,29 +43,24 @@ describe("understand sharded diff docs", () => {
       join(pluginRoot, "skills", "understand", "SKILL.md"),
       "utf-8",
     );
-    const shardedSectionStart = skill.indexOf(
-      "### Sharded file-level incremental update path",
-    );
-    const shardedPhase2 = skill.slice(
+    const shardedSectionStart = skill.indexOf("## Sharded Update");
+    const shardedSection = skill.slice(
       shardedSectionStart,
-      skill.indexOf("\n---\n\n## Phase 3", shardedSectionStart),
+      skill.indexOf("\n## Phase 0.5", shardedSectionStart),
     );
 
     expect(skill).toContain("skills/understand/update-diff-workflow.md");
-    expect(skill).toContain(
-      "delegates detailed sharded update rules to `skills/understand/update-diff-workflow.md`",
-    );
     expect(skill).toContain("update-diff-workflow.md");
-    expect(skill).toContain(
-      "do not follow the legacy non-sharded Phase 2 merge/finalize flow",
-    );
-    expect(shardedPhase2).not.toContain("batch-existing.json");
-    expect(shardedPhase2).not.toContain(
+    expect(skill).toContain("sharded update summary");
+    expect(shardedSection).toContain("sharded-update-workflow.mjs $PROJECT_ROOT plan");
+    expect(shardedSection).toContain("assemble-shard --shard <id>");
+    expect(shardedSection).toContain("commit");
+    expect(shardedSection).not.toContain("batch-existing.json");
+    expect(shardedSection).not.toContain(
       "保存到 `.understand-anything/shards/<id>.json`",
     );
-    expect(shardedPhase2).not.toContain("刷新根 `knowledge-graph.json`");
-    expect(shardedPhase2).not.toContain("sharded-update-workflow.mjs $PROJECT_ROOT plan");
-    expect(shardedPhase2).not.toContain("intermediate/sharded/<shardId>/batch-001.json");
+    expect(shardedSection).not.toContain("刷新根 `knowledge-graph.json`");
+    expect(shardedSection).not.toContain("intermediate/sharded/<shardId>/batch-001.json");
   });
 
   it("documents sharded file-analyzer output contract", () => {
