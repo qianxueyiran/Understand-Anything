@@ -38,6 +38,32 @@ describe("understand sharded diff docs", () => {
     expect(skill).not.toContain("--with-product");
   });
 
+  it("preserves language and project context injection for shard output quality", () => {
+    const skill = readFileSync(
+      join(pluginRoot, "skills", "understand", "SKILL.md"),
+      "utf-8",
+    );
+
+    expect(skill).toContain("Project README (first 3000 chars)");
+    expect(skill).toContain("Package manifest");
+    expect(skill).toContain(
+      "The README and manifest are authoritative",
+    );
+
+    const scannerSection = skill.slice(
+      skill.indexOf("## Phase 1"),
+      skill.indexOf("## Phase 2"),
+    );
+    expect(scannerSection).toContain("$LANGUAGE_DIRECTIVE");
+
+    const analyzerSection = skill.slice(
+      skill.indexOf("## Phase 2"),
+      skill.indexOf("## Phase 3"),
+    );
+    expect(analyzerSection).toContain("$LANGUAGE_DIRECTIVE");
+    expect(analyzerSection).toContain("Project: `<projectName>`");
+  });
+
   it("documents the executable sharded update workflow ownership", () => {
     const skill = readFileSync(
       join(pluginRoot, "skills", "understand", "SKILL.md"),

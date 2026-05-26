@@ -60,19 +60,23 @@ If the command is not one of the supported forms above, stop and show the suppor
    > **Language directive**: Generate descriptive textual content (`description`、`summary`、`title`、`tags`、`businessSignals[].text`、`languageNotes`、`languageLesson`, and natural-language explanations) in **{language}**. Maintain technical accuracy while using natural, native-level phrasing in the target language. Keep code identifiers, file paths, schema fields, framework/library names, API names, and standard technical keywords in their original language when that preserves accuracy or searchability.
    ```
 
-5. **Resolve command mode:**
+5. **Collect project context for subagent injection:**
+   - Read `README.md` (or `README.rst`, `readme.md`) from `$PROJECT_ROOT` if it exists. Store as `$README_CONTENT` (first 3000 characters).
+   - Read the primary package manifest (`package.json`, `pyproject.toml`, `Cargo.toml`, `go.mod`, `pom.xml`) if it exists. Store as `$MANIFEST_CONTENT`.
+
+6. **Resolve command mode:**
    - If `--scope <paths>` and `--shard <id>` are both present, run shard generation.
    - If exactly one of `--scope` or `--shard` is present, stop with a scoped shard argument error.
    - If `--update-diff` is present, require `.understand-anything/knowledge-graph.json` with top-level `kind: "codebase-sharded"`, then follow `skills/understand/update-diff-workflow.md`.
    - Otherwise stop and show the supported command list.
 
-6. **Validate shard arguments for shard generation:**
+7. **Validate shard arguments for shard generation:**
    - Split `--scope <paths>` by comma, trim entries, and reject empty entries.
    - Treat every scope as project-relative, resolve it against `PROJECT_ROOT`, and reject paths that do not exist or escape `PROJECT_ROOT`.
    - Validate `--shard <id>` with `^[A-Za-z0-9_-]+$`.
    - Store `SHARD_ID`, `SCOPE_PATHS`, and `SCOPE_ROOTS`.
 
-7. **Create working directories:**
+8. **Create working directories:**
 
    ```bash
    mkdir -p "$PROJECT_ROOT/.understand-anything/intermediate"
@@ -108,9 +112,32 @@ Dispatch `project-scanner` using `agents/project-scanner.md`.
 
 Additional context:
 
+```markdown
+> **Additional context from main session:**
+>
+> Project README (first 3000 chars):
+> ```
+> $README_CONTENT
+> ```
+>
+> Package manifest:
+> ```
+> $MANIFEST_CONTENT
+> ```
+>
+> Use this context to produce more accurate project name, description, and framework detection. The README and manifest are authoritative — prefer their information over heuristics.
+>
+> $LANGUAGE_DIRECTIVE
+```
+
+Prompt parameters:
+
 ```text
+Scan this project directory to discover all project files, detect languages and frameworks, and produce the scoped shard inventory.
 Project root: $PROJECT_ROOT
 Scope roots: $SCOPE_ROOTS
+Include only files under these scope roots in `files`. Returned file paths must still be relative to `$PROJECT_ROOT`.
+Build `importMap` keys for scope files only, but resolve import targets against the full repository file list so cross-scope dependencies appear in `importMap` values.
 Output path: $PROJECT_ROOT/.understand-anything/intermediate/scan-result.json
 ```
 
@@ -140,7 +167,20 @@ Batching rules:
 - include every file's `path`, `language`, `sizeLines`, and `fileCategory`;
 - construct `batchImportData` from `importMap` for every file in the batch.
 
-Dispatch `file-analyzer` for each batch using `agents/file-analyzer.md`, up to **6 subagents concurrently**. The prompt must include:
+Dispatch `file-analyzer` for each batch using `agents/file-analyzer.md`, up to **6 subagents concurrently**.
+
+Additional context:
+
+```markdown
+> **Additional context from main session:**
+>
+> Project: `<projectName>` — `<projectDescription>`
+> Languages: `<languages from Phase 1>`
+>
+> $LANGUAGE_DIRECTIVE
+```
+
+The prompt must include:
 
 ```text
 Analyze these files and produce GraphNode and GraphEdge objects.
