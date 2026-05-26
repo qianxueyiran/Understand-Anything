@@ -1,215 +1,101 @@
-# Auto-Update Knowledge Graph (Internal — Hook-Triggered)
+# Auto-Update Knowledge Graph (Internal Hook)
 
-Incrementally update the knowledge graph using deterministic structural fingerprinting to minimize token usage. This prompt is triggered automatically by the post-commit hook when `autoUpdate` is enabled. It is NOT a user-facing skill.
+本 hook 只支持 codebase-sharded 的 shard-only code graph，等价于执行 `/understand --update-diff`。
 
-**Key principle:** Spend zero LLM tokens when changes are cosmetic (formatting, internal logic). Only invoke LLM agents when structural changes (new/removed functions, classes, imports, exports) are detected.
+它由 post-commit hook 在 `autoUpdate` 启用时触发，不是面向用户的 skill。
 
 ---
 
-## Phase 0 — Pre-flight (Zero Token Cost)
+## Phase 0 — Pre-flight
 
 1. Set `PROJECT_ROOT` to the current working directory.
 
-2. Check that `$PROJECT_ROOT/.understand-anything/knowledge-graph.json` exists.
-   - If not: report "No existing knowledge graph found. Run `/understand` first to create one." and **STOP**.
+2. Read `$PROJECT_ROOT/.understand-anything/knowledge-graph.json`.
+   - If it does not exist: report `Auto-update requires codebase-sharded manifest. Run /understand --scope <paths> --shard <id> first.` and **STOP**.
+   - If top-level `kind !== "codebase-sharded"`: report the same message and **STOP**.
 
-3. 在检查 `meta.json` 之前，以 raw JSON 读取 `$PROJECT_ROOT/.understand-anything/knowledge-graph.json` 并检查 top-level `kind`。
+3. Read `knowledge-graph.json.update.gitCommitHash`.
+   - If missing, build baseline update metadata from the existing `shards[]` entries before planning the diff.
 
-   如果 `kind === "codebase-sharded"`：
-   1. 将本 hook 视为等价于 `/understand --update-diff`。
-   2. 读取 `knowledge-graph.json.update.gitCommitHash`；如果缺失，则根据现有 `shards[]` 构建 baseline update metadata。
-   3. 执行一次全局 diff：
-      ```bash
-      git diff <lastCommitHash>..HEAD --name-only
-      ```
-   4. 使用 sharded file-level incremental update patch 所有受影响 code shards。
-   5. 默认不要重建 domain/product；只有未来配置项 `autoUpdateDomain` 或 `autoUpdateProduct` 明确为 true 时才执行对应下游重建。
-   6. 保存 manifest `update` metadata 后 **STOP**。不要进入非分片 `meta.json` / `fingerprints.json` 路径。
-
-4. Check that `$PROJECT_ROOT/.understand-anything/meta.json` exists and read `gitCommitHash`.
-   - If not: report "No analysis metadata found. Run `/understand` to create a baseline." and **STOP**.
-
-5. Get current commit hash:
+4. Get current commit hash:
    ```bash
    git rev-parse HEAD
    ```
 
-6. If commit hashes match and `--force` is NOT in `$ARGUMENTS`: report "Knowledge graph is already up to date." and **STOP**.
-
-7. Get changed files:
-   ```bash
-   git diff <lastCommitHash>..HEAD --name-only
-   ```
-   If no files changed: update `meta.json` with the new commit hash and **STOP**.
-
-8. Filter to source files only (`.ts`, `.tsx`, `.js`, `.jsx`, `.py`, `.go`, `.rs`, `.java`, `.rb`, `.cpp`, `.c`, `.h`, `.cs`, `.swift`, `.kt`, `.php`).
-   If no source files changed: update `meta.json` with the new commit hash, report "Only non-source files changed. Metadata updated." and **STOP**.
-
-9. Create intermediate directory:
-   ```bash
-   mkdir -p $PROJECT_ROOT/.understand-anything/intermediate
-   ```
+5. If the manifest commit hash matches the current commit and `--force` is not present in `$ARGUMENTS`, report `Knowledge graph is already up to date.` and **STOP**.
 
 ---
 
-## Phase 1 — Structural Fingerprint Check (Zero LLM Tokens)
+## Phase 1 — Plan Sharded Update
 
-This phase runs a deterministic Node.js script that compares file structures against stored fingerprints. It costs **zero LLM tokens** — only the script execution cost.
+Run the sharded update workflow planner:
 
-1. Write and execute a Node.js script (`$PROJECT_ROOT/.understand-anything/intermediate/fingerprint-check.mjs`):
-
-```javascript
-// The script should:
-// 1. Read fingerprints.json from .understand-anything/fingerprints.json
-// 2. For each changed source file:
-//    a. Read the file content
-//    b. Compute SHA-256 content hash
-//    c. If content hash matches stored hash → NONE (skip)
-//    d. Extract structural elements via regex:
-//       - Functions: match patterns like `function NAME(`, `const NAME = (`, `export function NAME(`
-//       - Classes: match `class NAME`, `export class NAME`
-//       - Imports: match `import ... from '...'`, `import '...'`
-//       - Exports: match `export { ... }`, `export default`, `export function`, `export class`, `export const`
-//    e. Compare extracted elements against stored fingerprint
-//    f. Classify as NONE, COSMETIC, or STRUCTURAL
-// 3. For new files (not in fingerprints.json): classify as STRUCTURAL
-// 4. For deleted files (in fingerprints.json but not on disk): classify as STRUCTURAL
-// 5. Determine overall decision:
-//    - All NONE/COSMETIC → action: "SKIP"
-//    - Some STRUCTURAL, ≤10 files, same directories → action: "PARTIAL_UPDATE"
-//    - New/deleted directories or >10 structural files → action: "ARCHITECTURE_UPDATE"
-//    - >30 structural files or >50% of graph → action: "FULL_UPDATE"
-// 6. Write result to .understand-anything/intermediate/change-analysis.json
+```bash
+node <plugin>/skills/understand/sharded-update-workflow.mjs plan --project-root "$PROJECT_ROOT"
 ```
 
-The output JSON should have this shape:
-```json
-{
-  "action": "SKIP | PARTIAL_UPDATE | ARCHITECTURE_UPDATE | FULL_UPDATE",
-  "filesToReanalyze": ["src/new-feature.ts"],
-  "rerunArchitecture": false,
-  "rerunTour": false,
-  "reason": "1 file has structural changes (new function added)",
-  "fileChanges": [
-    { "filePath": "src/utils.ts", "changeLevel": "COSMETIC", "details": ["internal logic changed"] },
-    { "filePath": "src/new-feature.ts", "changeLevel": "STRUCTURAL", "details": ["new function: handleRequest"] }
-  ]
-}
+Read the generated run record from `.understand-anything/intermediate/`.
+
+The planner maps changed files to affected shard ids, computes file-level decisions, and records the exact shard write plan. Treat that run record as the source of truth for all later phases.
+
+---
+
+## Phase 2 — Re-Analyze Affected Files
+
+Process each shard plan entry from the run record:
+
+- `noop`: skip the shard.
+- `deleted-only`: run the assemble step for the shard so removed file nodes and dangling edges are pruned.
+- `needs-file-analysis`: dispatch `file-analyzer` for the listed files, then run the assemble step for that shard.
+
+When dispatching `file-analyzer`, include:
+
+- Project root: `$PROJECT_ROOT`
+- Shard id
+- Shard scope paths
+- Existing shard graph path
+- Files to analyze
+- Output path under `.understand-anything/intermediate/`
+
+Analyze only the files listed by the shard plan. Use the existing shard graph and manifest context for import resolution and relationship continuity.
+
+---
+
+## Phase 3 — Commit Sharded Outputs
+
+Run the sharded update commit step after all affected shard entries are processed:
+
+```bash
+node <plugin>/skills/understand/sharded-update-workflow.mjs commit --project-root "$PROJECT_ROOT"
 ```
 
-2. Read `.understand-anything/intermediate/change-analysis.json`.
+The commit step updates:
 
-3. **Decision gate:**
+- `.understand-anything/shards/<id>.json`
+- `.understand-anything/knowledge-graph.json`
+- `.understand-anything/intermediate/` run metadata
 
-   | Action | What to do |
-   |---|---|
-   | `SKIP` | Update `meta.json` with new commit hash. Report: "No structural changes detected. Graph metadata updated. Zero tokens spent." **STOP.** |
-   | `FULL_UPDATE` | Report: "Major structural changes detected (reason). Recommend running `/understand --full` for a complete rebuild." **STOP.** |
-   | `PARTIAL_UPDATE` | Proceed to Phase 2 with `filesToReanalyze` |
-   | `ARCHITECTURE_UPDATE` | Proceed to Phase 2 with `filesToReanalyze` (large structural change set; same merge path as `PARTIAL_UPDATE`) |
+Do not rebuild domain or product artifacts from this hook.
 
 ---
 
-## Phase 2 — Targeted Re-Analysis (Minimal Token Cost)
+## Phase 4 — Report
 
-Only re-analyze files with structural changes. This is the **only** phase that costs LLM tokens.
+Report a concise summary:
 
-1. Read the existing knowledge graph from `$PROJECT_ROOT/.understand-anything/knowledge-graph.json`.
+- Affected shard ids
+- Files analyzed
+- Deleted files pruned
+- Warnings from the run record
+- Updated `knowledge-graph.json.update.gitCommitHash`
 
-2. Batch the files from `filesToReanalyze` (from Phase 1). Use a single batch if ≤10 files, otherwise batch into groups of 5-10.
-
-3. For each batch, dispatch a subagent using the `file-analyzer` agent definition (at `agents/file-analyzer.md`). Append:
-
-   > **Additional context from main session:**
-   >
-   > Project: `<projectName from existing graph>` — `<projectDescription>`
-   > Frameworks detected: `<frameworks from existing graph>`
-   > Languages: `<languages from existing graph>`
-   >
-   > **IMPORTANT:** This is an incremental update. Only the files listed below have structural changes. Analyze them thoroughly but do not invent nodes for files not in this batch.
-
-   Fill in batch-specific parameters:
-
-   > Analyze these source files and produce GraphNode and GraphEdge objects.
-   > Project root: `$PROJECT_ROOT`
-   > Project: `<projectName>`
-   > Languages: `<languages>`
-   > Batch index: `1`
-   > Write output to: `$PROJECT_ROOT/.understand-anything/intermediate/batch-1.json`
-   >
-   > All project files (for import resolution):
-   > `<file list from existing graph nodes>`
-   >
-   > Files to analyze in this batch:
-   > 1. `<path>` (`<sizeLines>` lines)
-   > ...
-
-4. After batch(es) complete, read each `batch-<N>.json` and merge results.
-
-5. **Merge with existing graph:**
-   - Remove old nodes whose `filePath` matches any file in `filesToReanalyze` or in the deleted files list
-   - Remove old edges whose `source` or `target` references a removed node
-   - Add new nodes and edges from the fresh analysis
-   - Deduplicate nodes by ID (keep latest), edges by `source + target + type`
-   - Remove any edge with dangling `source` or `target` references
-
----
-
-## Phase 3 — Validate and Save
-
-`/understand` no longer generates `layers` or `tour`. After merging nodes and edges, **delete** top-level `layers` and `tour` if present (from older graphs).
-
-Perform lightweight validation (no graph-reviewer agent):
-1. Remove any edge with dangling `source` or `target`
-2. Ensure `layers` and `tour` keys are absent before save
-
-### Save
-
-1. Write the final knowledge graph to `$PROJECT_ROOT/.understand-anything/knowledge-graph.json`.
-
-2. Write updated metadata to `$PROJECT_ROOT/.understand-anything/meta.json`:
-   ```json
-   {
-     "lastAnalyzedAt": "<ISO 8601 timestamp>",
-     "gitCommitHash": "<current commit hash>",
-     "version": "1.0.0",
-     "analyzedFiles": <total file count in graph>
-   }
-   ```
-
-3. **Update fingerprints:** Write and execute a Node.js script that:
-   - Reads the existing `fingerprints.json`
-   - For each re-analyzed file: computes new content hash and extracts structural elements via regex
-   - For deleted files: removes their entries
-   - Merges with existing fingerprints (keep unchanged files as-is)
-   - Writes updated `fingerprints.json`
-
-4. Clean up intermediate files:
-   ```bash
-   rm -rf $PROJECT_ROOT/.understand-anything/intermediate
-   ```
-
-5. Report a summary:
-   - Files checked: N (total changed)
-   - Structural changes found: N files
-   - Cosmetic-only changes: N files (skipped)
-   - Nodes updated: N
-   - Action taken: PARTIAL_UPDATE / ARCHITECTURE_UPDATE
-   - Path to output: `$PROJECT_ROOT/.understand-anything/knowledge-graph.json`
+If any shard failed after one retry, report the failing shard id and preserve the run record for debugging.
 
 ---
 
 ## Error Handling
 
-- If the fingerprint check script fails: fall back to treating all changed files as STRUCTURAL (conservative approach).
-- If `fingerprints.json` doesn't exist: treat all changed files as STRUCTURAL and regenerate fingerprints after the update.
-- If a subagent dispatch fails: retry once. If it fails again, save partial results and report the error.
-- ALWAYS save partial results — a partially updated graph is better than no update.
-
----
-
-## Notes
-
-- This skill reuses the same `file-analyzer` agent definition as `/understand` — no separate agent prompts needed.
-- The fingerprint comparison in Phase 1 uses regex-based extraction (not tree-sitter) because it runs as a temporary Node.js script and doesn't need full AST accuracy — just signature-level detection.
-- The authoritative fingerprints stored in `fingerprints.json` are generated by `/understand` Phase 5 using the core `fingerprint.ts` module (which uses tree-sitter for precise extraction).
+- If planning fails, stop and report the planner error.
+- If a `file-analyzer` dispatch fails, retry once for that shard.
+- If assembly or commit fails, stop and report the failing step.
+- Never write a partial manifest without the commit step succeeding.

@@ -178,5 +178,10 @@ describe("understand sharded diff docs", () => {
     expect(hookPrompt).toContain("codebase-sharded");
     expect(hookPrompt).toContain("/understand --update-diff");
     expect(hookPrompt).toContain("knowledge-graph.json.update");
+    expect(hookPrompt).toContain("只支持 codebase-sharded");
+    expect(hookPrompt).not.toContain("meta.json");
+    expect(hookPrompt).not.toContain("fingerprints.json");
+    expect(hookPrompt).not.toContain("PARTIAL_UPDATE");
+    expect(hookPrompt).not.toContain("FULL_UPDATE");
   });
 });
