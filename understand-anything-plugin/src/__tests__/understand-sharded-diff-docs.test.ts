@@ -176,9 +176,12 @@ describe("understand sharded diff docs", () => {
     expect(skill).not.toContain("architecture-analyzer");
     expect(skill).not.toContain("tour-builder");
     expect(workflow).toContain("Supported workflow commands only");
-    expect(workflow).toContain("Legacy commands");
-    expect(workflow).toContain("are removed");
     expect(workflow).not.toContain("sharded-update-workflow.mjs $PROJECT_ROOT prepare");
+    expect(workflow).not.toContain("Non-Sharded Graphs");
+    expect(workflow).not.toContain("non-sharded");
+    expect(workflow).not.toContain("legacy");
+    expect(workflow).not.toContain("ordinary graphs");
+    expect(workflow).not.toContain("Do not follow");
   });
 
   it("documents product/domain refresh orchestration in a separate skill", () => {

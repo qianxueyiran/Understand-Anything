@@ -1,12 +1,8 @@
 # Update Diff Workflow
 
-This document is the focused contract for `/understand --update-diff`. Keep `SKILL.md` responsible for option parsing and agent dispatch, and keep `sharded-update-workflow.mjs` responsible for validating the `plan`, `assemble-shard`, and `commit` transaction states.
+This document is the focused shard-only contract for `/understand --update-diff`. Keep `SKILL.md` responsible for option parsing and agent dispatch, and keep `sharded-update-workflow.mjs` responsible for validating the `plan`, `assemble-shard`, and `commit` transaction states.
 
-## Non-Sharded Graphs
-
-When `.understand-anything/knowledge-graph.json` is absent or is not `kind: "codebase-sharded"`, the existing non-sharded incremental path remains in effect. `/understand --update-diff` should continue to reuse the legacy changed-file analysis and graph merge flow for ordinary graphs.
-
-## Sharded Graphs
+## Sharded Update
 
 When the root graph is `kind: "codebase-sharded"`, `/understand --update-diff` runs a simplified transaction over all affected code shards:
 
@@ -33,9 +29,9 @@ Classification rule: any file that appears in the git diff and still exists in t
 
 ### Orchestration (`/understand`)
 
-Do not follow the legacy non-sharded Phase 2 merge/finalize flow for a sharded root manifest. Execute the steps below, then stop after the sharded update summary. Do not run non-sharded Phase 3 merge, assemble-review, or manifest finalization.
+Execute the steps below, then stop after the sharded update summary.
 
-**Supported workflow commands only:** `plan`, `assemble-shard --shard <id>`, `commit`, and optional `reconcile-warnings`. Legacy commands (`prepare`, `write-batch-existing`, `finalize-code`, `finalize-manifest`, `finalize-downstream`) are removed.
+**Supported workflow commands only:** `plan`, `assemble-shard --shard <id>`, `commit`, and optional `reconcile-warnings`.
 
 **Workflow script** (run from `$PROJECT_ROOT`; `<SKILL_DIR>` is the understand skill directory):
 
