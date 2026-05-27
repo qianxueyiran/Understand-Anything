@@ -184,6 +184,28 @@ describe("understand sharded diff docs", () => {
     expect(workflow).not.toContain("Do not follow");
   });
 
+  it("documents update-diff as an executable phase workflow", () => {
+    const workflow = readFileSync(
+      join(pluginRoot, "skills", "understand", "update-diff-workflow.md"),
+      "utf-8",
+    );
+
+    expect(workflow).toContain("## Inputs");
+    expect(workflow).toContain("## Outputs");
+    expect(workflow).toContain("## Phase 1 — PLAN");
+    expect(workflow).toContain("## Phase 2 — ANALYZE AFFECTED SHARDS");
+    expect(workflow).toContain("## Phase 3 — ASSEMBLE SHARDS");
+    expect(workflow).toContain("## Phase 4 — COMMIT");
+    expect(workflow).toContain("## Report");
+    expect(workflow).toContain("## Error Handling");
+    expect(workflow).toContain("Extract and keep `runId`, `headCommitHash`, `status`, `warnings`, `unmappedChangedFiles`, and `shards[]`");
+    expect(workflow).toContain("MUST READ AND FOLLOW `agents/file-analyzer.md`");
+    expect(workflow).toContain("Read the batch output before assembling");
+    expect(workflow).toContain("Read the assemble result");
+    expect(workflow).toContain("Read the refreshed manifest");
+    expect(workflow).toContain("Affected shard ids");
+  });
+
   it("documents product/domain refresh orchestration in a separate skill", () => {
     const skill = readFileSync(
       join(pluginRoot, "skills", "understand-refresh", "SKILL.md"),
