@@ -184,6 +184,39 @@ describe("understand sharded diff docs", () => {
     expect(workflow).not.toContain("Do not follow");
   });
 
+  it("keeps update-diff overview and status contracts non-duplicative", () => {
+    const workflow = readFileSync(
+      join(pluginRoot, "skills", "understand", "update-diff-workflow.md"),
+      "utf-8",
+    );
+    const overview = workflow.slice(
+      workflow.indexOf("## Sharded Update"),
+      workflow.indexOf("## Phase 1"),
+    );
+    const runStatusSection = workflow.slice(
+      workflow.indexOf("### Run Status Contract"),
+      workflow.indexOf("### Shard Status Contract"),
+    );
+    const shardStatusSection = workflow.slice(
+      workflow.indexOf("### Shard Status Contract"),
+      workflow.indexOf("### Assemble Result Status Contract"),
+    );
+    const assembleStatusSection = workflow.slice(
+      workflow.indexOf("### Assemble Result Status Contract"),
+    );
+
+    expect(overview).not.toContain("1. Run `plan`");
+    expect(overview).not.toContain("2. Dispatch `file-analyzer`");
+    expect(overview).not.toContain("3. Run `assemble-shard");
+    expect(overview).not.toContain("4. Run `commit`");
+    expect(runStatusSection).toContain("| Status | Meaning |");
+    expect(shardStatusSection).toContain("| Status | Meaning |");
+    expect(assembleStatusSection).toContain("| Status | Meaning |");
+    expect(runStatusSection).not.toContain("Dispatch/commit handling");
+    expect(shardStatusSection).not.toContain("Dispatch/commit handling");
+    expect(assembleStatusSection).not.toContain("Dispatch/commit handling");
+  });
+
   it("documents update-diff as an executable phase workflow", () => {
     const workflow = readFileSync(
       join(pluginRoot, "skills", "understand", "update-diff-workflow.md"),

@@ -25,20 +25,16 @@ Keep `SKILL.md` responsible for option parsing and agent dispatch. Keep `sharded
 
 ## Sharded Update
 
-When the root graph is `kind: "codebase-sharded"`, `/understand --update-diff` runs a simplified transaction over affected code shards:
+When the root graph is `kind: "codebase-sharded"`, `/understand --update-diff` is a transaction over affected code shards.
 
-1. Run `plan` to compute one run-scoped diff, map changed files to shards, and write the current sharded update plan.
-2. Dispatch `file-analyzer` for every shard marked `needs-file-analysis`.
-3. Run `assemble-shard --shard <id>` for each affected shard so the workflow can merge retained shard content with the current-run analyzer output and write a `candidate-shard.json` when a structural candidate exists. Candidates must not include `layers` or `tour` keys.
-4. Run `commit` to validate code shards transactionally. A successful commit publishes code shard artifacts/metadata and advances `knowledge-graph.json.update.gitCommitHash`.
+Core invariants:
 
-All artifacts written after `plan` must include `runId`, `headCommitHash`, and `shardId`. `commit` rejects artifacts whose run identity does not match the active plan, whose `headCommitHash` is stale, or whose `shardId` belongs to a different affected shard. This applies to analyzer batches, assemble results, and `candidate-shard.json`.
-
-`assemble-shard` must reject missing analyzer output for shards that need file analysis, failed analyzer output, or stale analyzer output from a previous run. For structural or deleted-file shards, a successful assemble result must point to the current run's `candidate-shard.json`; missing candidates, candidate paths outside the required output location, invalid edge endpoints, and candidates that omit required structural file nodes are rejected later by `commit`.
-
-After writing `candidate-shard.json`, `assemble-shard` runs `merge-batch-graphs.py --import-recovery-only --graph <candidate>` so missing `imports` edges are recovered from `scan-result.json` `importMap`. When the candidate path is under `intermediate/sharded/`, targets without a `file:` node in the candidate become `imports` edges with `external: true` (path-only target, no scope-out node). `commit` allows these edges when `external: true` and the source endpoint exists in the candidate; ordinary dangling edges are still rejected. External targets are not refreshed when only another shard's files change and this shard has no structural files in the diff — that lag is acceptable for B-only dependency updates.
-
-`commit` is the only command allowed to advance `knowledge-graph.json.update.gitCommitHash`. It must not partially publish valid shards when another affected shard has a missing, stale, or failed assemble result.
+- Artifacts written after `plan` must carry the active `runId`, `headCommitHash`, and `shardId`.
+- Published shard candidates must not include `layers` or `tour` keys.
+- `sharded-update-workflow.mjs` rejects stale, missing, failed, cross-run, and cross-shard artifacts.
+- `merge-batch-graphs.py --import-recovery-only` recovers `imports` edges from `scan-result.json` `importMap`; cross-shard targets are preserved as `external: true` imports.
+- `commit` is the only command allowed to advance `knowledge-graph.json.update.gitCommitHash`.
+- `commit` must not partially publish valid shards when another affected shard is rejected.
 
 Product/domain refresh is deliberately outside this workflow. Use `/understand-refresh` when the user wants to run code update followed by `/understand-domain --shard <id>` and/or `/understand-product --shard <id>`. That orchestration is sequential and recoverable; it does not require `/understand` to wait for product/domain current-run result files.
 
@@ -162,23 +158,23 @@ Report a concise Chinese summary:
 
 ### Run Status Contract
 
-| Status | Meaning | Dispatch/commit handling |
-|---|---|---|
-| `ready` | `plan` mapped changes to shards and the run can proceed. | Dispatch only the shards listed by the plan, then assemble and commit the same `runId`. |
-| `blocked` | Baseline, manifest, or shard metadata is missing or unsafe. | Do not dispatch analyzers or commit; report warnings and ask the user to rerun from a trustworthy baseline. |
+| Status | Meaning |
+|---|---|
+| `ready` | `plan` mapped changes to shards and the run can proceed. |
+| `blocked` | Baseline, manifest, or shard metadata is missing or unsafe. |
 
 ### Shard Status Contract
 
-| Status | Meaning | Dispatch/commit handling |
-|---|---|---|
-| `blocked` | The run is blocked, so shard work is blocked too. | Do not dispatch analyzers, assemble, or commit this shard. |
-| `needs-file-analysis` | The shard has structural or new-file changes (any existing file in the diff), possibly alongside deletions. | Dispatch `file-analyzer`, then run `assemble-shard --shard <id>` and require a valid assemble result before commit. |
-| `deleted-only` | The shard has deleted files but no structural files. | Run `assemble-shard --shard <id>` so deletion pruning can produce a candidate, then commit. |
-| `noop` | The shard is not affected by this run. | Do not dispatch analyzers or assemble; `commit` ignores it. |
+| Status | Meaning |
+|---|---|
+| `blocked` | The run is blocked, so shard work is blocked too. |
+| `needs-file-analysis` | The shard has structural or new-file changes (any existing file in the diff), possibly alongside deletions. |
+| `deleted-only` | The shard has deleted files but no structural files. |
+| `noop` | The shard is not affected by this run. |
 
 ### Assemble Result Status Contract
 
-| Status | Meaning | Dispatch/commit handling |
-|---|---|---|
-| `success` | `assemble-shard` produced a current-run result and, for structural or deleted-only shards, a valid `candidate-shard.json`. | `commit` may publish it after validating `runId`, `headCommitHash`, `shardId`, candidate location, nodes, and edges. |
-| `failed` | Analyzer or assembly failed, or required current-run artifacts are missing or stale. | `commit` rejects the transaction and must not partially save other affected shards. |
+| Status | Meaning |
+|---|---|
+| `success` | `assemble-shard` produced a current-run result and, for structural or deleted-only shards, a valid `candidate-shard.json`. |
+| `failed` | Analyzer or assembly failed, or required current-run artifacts are missing or stale. |
