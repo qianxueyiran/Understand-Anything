@@ -4,6 +4,7 @@ import { validateProductIndex, type ProductCoverageWarning } from "../product-in
 import {
   buildProductBoundaryCandidates,
   buildTopicContextPacks,
+  toAnalyzerContextPack,
   finalizeGroundedProductIndex,
   normaliseProductTopics,
 } from "../product-index-builder.js";
@@ -96,6 +97,43 @@ describe("grounded product index builder", () => {
     expect(candidates[0].businessSignals.map((signal) => signal.text)).toEqual(
       expect.arrayContaining(["开机广播接收入口", "接收开机广播并启动后续处理"]),
     );
+    expect(candidates[0].neighborNodeIds.length).toBeLessThanOrEqual(8);
+  });
+
+  it("requires two businessSignals and entry/integration signal or product role name", () => {
+    const singleSignalFile = node({
+      id: "file:app/HomeBootTask.java",
+      type: "file",
+      name: "HomeBootTask.java",
+      filePath: "app/HomeBootTask.java",
+      businessSignals: [{ type: "data", text: "开机后首页数据请求" }],
+    });
+    const integrationFile = node({
+      id: "file:app/SyncBridge.java",
+      type: "file",
+      name: "SyncBridge.java",
+      filePath: "app/SyncBridge.java",
+      businessSignals: [
+        { type: "integration", text: "同步外部账号数据" },
+        { type: "data", text: "写入本地登录态" },
+      ],
+    });
+    const displayOnlyFile = node({
+      id: "file:app/ToastHelper.java",
+      type: "file",
+      name: "ToastHelper.java",
+      filePath: "app/ToastHelper.java",
+      businessSignals: [
+        { type: "display", text: "展示提示" },
+        { type: "rule", text: "频控规则" },
+      ],
+    });
+
+    const candidates = buildProductBoundaryCandidates(
+      graph([singleSignalFile, integrationFile, displayOnlyFile]),
+    );
+
+    expect(candidates.map((candidate) => candidate.rootNodeId)).toEqual([integrationFile.id]);
   });
 
   it("builds compact topic context packs and keeps symbol anchors", () => {
@@ -133,6 +171,11 @@ describe("grounded product index builder", () => {
       [],
     );
     expect(packs[0].candidateFiles.map((file) => file.filePath)).not.toContain("common/BaseReceiver.java");
+    expect(packs[0].topic).not.toHaveProperty("sourceCandidateIds");
+    expect(packs[0]).not.toHaveProperty("roots");
+    expect(packs[0]).not.toHaveProperty("overflowFiles");
+    expect(toAnalyzerContextPack(packs[0])).not.toHaveProperty("overflowFileCount");
+    expect(packs[0].candidateFiles.every((file) => file.anchors.length <= 3)).toBe(true);
   });
 
   it("builds file-level anchors for file-only graphs", () => {
@@ -391,7 +434,19 @@ describe("grounded product index builder", () => {
     const index = finalizeGroundedProductIndex({
       graph: kg,
       topics: [topic],
-      contextPacks: [{ topic, roots: [], candidateFiles: [], overflowFiles: [] }],
+      contextPacks: [
+        {
+          topic: {
+            id: topic.id,
+            name: topic.name,
+            summary: topic.summary,
+            kind: topic.kind,
+            rootNodeIds: topic.rootNodeIds,
+            domainRefs: topic.domainRefs,
+          },
+          candidateFiles: [],
+        },
+      ],
       extractions: [
         {
           topicId: "topic:empty",

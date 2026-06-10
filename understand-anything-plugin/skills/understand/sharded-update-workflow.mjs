@@ -76,6 +76,79 @@ function normalizeChangedFiles(files) {
   return [...new Set(files)].filter((filePath) => filePath && !filePath.startsWith(".understand-anything/"));
 }
 
+/** Node types that satisfy a structural file path during commit validation. */
+const STRUCTURAL_FILE_NODE_TYPES = new Set(["file", "config", "document"]);
+
+function nodeCoversStructuralFile(nodes, filePath) {
+  return (nodes ?? []).some(
+    (node) =>
+      node.filePath === filePath && STRUCTURAL_FILE_NODE_TYPES.has(node.type),
+  );
+}
+
+/**
+ * Parse `git diff --name-status -M` into changed paths, deleted paths, and renames.
+ * Rename/copy old paths are tracked as deletions so shard graphs can prune stale nodes.
+ */
+function parseGitDiffNameStatus(projectRoot, baseCommitHash, headCommitHash) {
+  if (!baseCommitHash) {
+    return { changedFiles: [], deletedFiles: [], renamed: [] };
+  }
+
+  const raw = runGit(projectRoot, [
+    "diff",
+    `${baseCommitHash}..${headCommitHash}`,
+    "--name-status",
+    "-M",
+  ]);
+  const changedFiles = [];
+  const deletedFiles = [];
+  const renamed = [];
+
+  for (const line of raw.split("\n")) {
+    if (!line.trim()) {
+      continue;
+    }
+    const tab = line.indexOf("\t");
+    if (tab === -1) {
+      continue;
+    }
+    const status = line.slice(0, tab);
+    const rest = line.slice(tab + 1);
+    const parts = rest.split("\t").filter(Boolean);
+
+    if (status.startsWith("R") || status.startsWith("C")) {
+      const oldPath = parts[0];
+      const newPath = parts[1];
+      if (!oldPath || !newPath) {
+        continue;
+      }
+      changedFiles.push(newPath);
+      deletedFiles.push(oldPath);
+      renamed.push({ oldPath, newPath, status });
+      continue;
+    }
+
+    if (status.startsWith("D")) {
+      if (parts[0]) {
+        deletedFiles.push(parts[0]);
+      }
+      continue;
+    }
+
+    const filePath = parts[parts.length - 1];
+    if (filePath) {
+      changedFiles.push(filePath);
+    }
+  }
+
+  return {
+    changedFiles: normalizeChangedFiles(changedFiles),
+    deletedFiles: normalizeChangedFiles(deletedFiles),
+    renamed,
+  };
+}
+
 function isSourceFile(filePath) {
   return [...SOURCE_EXTENSIONS].some((extension) => filePath.endsWith(extension));
 }
@@ -232,6 +305,36 @@ function matchChangedFilesToShard(filePath, shard, shardGraph) {
   return undefined;
 }
 
+function ensureAffectedShardEntry(affectedByShard, shard, shardGraph, reason) {
+  if (!affectedByShard.has(shard.id)) {
+    affectedByShard.set(shard.id, {
+      id: shard.id,
+      path: shard.path,
+      scopes: shard.scopes ?? [],
+      changedFiles: [],
+      gitDeletedFiles: [],
+      structuralFiles: [],
+      deletedFiles: [],
+      reason,
+      shardGraph,
+    });
+  }
+  return affectedByShard.get(shard.id);
+}
+
+function mapPathToShard(filePath, manifest, uaDir, affectedByShard) {
+  for (const shard of manifest.shards ?? []) {
+    const shardGraph = readJson(join(uaDir, shard.path));
+    const reason = matchChangedFilesToShard(filePath, shard, shardGraph);
+    if (!reason) {
+      continue;
+    }
+    ensureAffectedShardEntry(affectedByShard, shard, shardGraph, reason);
+    return shard.id;
+  }
+  return undefined;
+}
+
 function buildShardedDiffPlan(projectRoot) {
   const uaDir = join(projectRoot, ".understand-anything");
   const manifestPath = join(uaDir, "knowledge-graph.json");
@@ -250,37 +353,31 @@ function buildShardedDiffPlan(projectRoot) {
       "Initialized sharded update baseline; rerun /understand --update-diff to classify changes from this commit.",
     );
   }
-  const changedFiles = baseCommitHash
-    ? normalizeChangedFiles(
-        runGit(projectRoot, ["diff", `${baseCommitHash}..${headCommitHash}`, "--name-only"])
-          .split("\n"),
-      )
-    : [];
+  const gitDiff = baseCommitHash
+    ? parseGitDiffNameStatus(projectRoot, baseCommitHash, headCommitHash)
+    : { changedFiles: [], deletedFiles: [], renamed: [] };
+  const changedFiles = gitDiff.changedFiles;
 
   const affectedByShard = new Map();
   const matchedFiles = new Set();
 
-  for (const shard of manifest.shards ?? []) {
-    const shardGraph = readJson(join(uaDir, shard.path));
-    for (const filePath of changedFiles) {
-      const reason = matchChangedFilesToShard(filePath, shard, shardGraph);
-      if (!reason) {
-        continue;
-      }
-      matchedFiles.add(filePath);
-      if (!affectedByShard.has(shard.id)) {
-        affectedByShard.set(shard.id, {
-          id: shard.id,
-          path: shard.path,
-          scopes: shard.scopes ?? [],
-          changedFiles: [],
-          structuralFiles: [],
-          deletedFiles: [],
-          reason,
-          shardGraph,
-        });
-      }
-      affectedByShard.get(shard.id).changedFiles.push(filePath);
+  for (const filePath of changedFiles) {
+    const shardId = mapPathToShard(filePath, manifest, uaDir, affectedByShard);
+    if (!shardId) {
+      continue;
+    }
+    matchedFiles.add(filePath);
+    affectedByShard.get(shardId).changedFiles.push(filePath);
+  }
+
+  for (const filePath of gitDiff.deletedFiles) {
+    const shardId = mapPathToShard(filePath, manifest, uaDir, affectedByShard);
+    if (!shardId) {
+      continue;
+    }
+    const entry = affectedByShard.get(shardId);
+    if (!entry.gitDeletedFiles.includes(filePath)) {
+      entry.gitDeletedFiles.push(filePath);
     }
   }
 
@@ -309,7 +406,7 @@ function buildShardedDiffPlan(projectRoot) {
         scopes: shard.scopes,
         changedFiles: shard.changedFiles,
         structuralFiles: [],
-        deletedFiles: [],
+        deletedFiles: [...shard.gitDeletedFiles],
         reason: shard.reason,
       });
       continue;
@@ -322,7 +419,9 @@ function buildShardedDiffPlan(projectRoot) {
       scopes: shard.scopes,
       changedFiles: shard.changedFiles,
       structuralFiles: classification.structuralFiles,
-      deletedFiles: classification.deletedFiles,
+      deletedFiles: [
+        ...new Set([...classification.deletedFiles, ...shard.gitDeletedFiles]),
+      ],
       reason: shard.reason,
     });
   }
@@ -488,7 +587,9 @@ function assembleShard(projectRoot, args) {
   if (shard.status === "deleted-only") {
     const oldGraph = readJson(join(uaDir, shard.path));
     const candidate = omitLayersAndTour({
-      ...pruneGraphForChangedFiles(oldGraph, [], shard.deletedFiles ?? []),
+      ...annotateOutboundExternalEdges(
+        pruneGraphForChangedFiles(oldGraph, [], shard.deletedFiles ?? []),
+      ),
       runId: run.runId,
       headCommitHash: run.headCommitHash,
       shardId,
@@ -543,12 +644,12 @@ function assembleShard(projectRoot, args) {
     shard.structuralFiles ?? [],
     shard.deletedFiles ?? [],
   );
-  const candidate = {
+  const candidate = annotateOutboundExternalEdges({
     ...mergeRetainedGraphWithBatches(retainedGraph, batches),
     runId: run.runId,
     headCommitHash: run.headCommitHash,
     shardId,
-  };
+  });
   const candidatePath = shard.requiredOutputs?.candidateShard ?? `intermediate/sharded/${shardId}/candidate-shard.json`;
   const candidateAbsPath = join(uaDir, candidatePath);
   writeJson(candidateAbsPath, candidate);
@@ -633,18 +734,34 @@ function stripTransientShardMetadata(candidate) {
   return omitLayersAndTour(graph);
 }
 
-function isShardExternalImportEdge(edge, nodeIds) {
+function annotateOutboundExternalEdges(graph) {
+  const nodeIds = new Set((graph.nodes ?? []).map((node) => node.id).filter(Boolean));
+  return {
+    ...graph,
+    edges: (graph.edges ?? []).map((edge) => {
+      if (!nodeIds.has(edge.source) || nodeIds.has(edge.target)) {
+        return edge;
+      }
+      if (edge.external === true) {
+        return edge;
+      }
+      return { ...edge, external: true };
+    }),
+  };
+}
+
+function isShardExternalEdge(edge, nodeIds) {
   if (edge?.external !== true) {
     return false;
   }
   if (!nodeIds.has(edge.source)) {
     return false;
   }
-  return typeof edge.target === "string" && edge.target.startsWith("file:");
+  return !nodeIds.has(edge.target);
 }
 
 function isDanglingShardEdge(edge, nodeIds) {
-  if (isShardExternalImportEdge(edge, nodeIds)) {
+  if (isShardExternalEdge(edge, nodeIds)) {
     return false;
   }
   return !nodeIds.has(edge.source) || !nodeIds.has(edge.target);
@@ -723,7 +840,7 @@ function collectCandidateContentWarnings(runShard, candidate) {
   const nodeIds = new Set(nodes.map((node) => node.id).filter(Boolean));
 
   for (const filePath of runShard.structuralFiles ?? []) {
-    if (!nodes.some((node) => node.type === "file" && node.filePath === filePath)) {
+    if (!nodeCoversStructuralFile(nodes, filePath)) {
       warnings.push(`${runShard.id} candidate is missing structural file ${filePath}`);
     }
   }

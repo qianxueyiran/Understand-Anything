@@ -1,86 +1,113 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import { mkdtempSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import type { KnowledgeGraph } from "@understand-anything/core/types";
 import { runProductIndexCli } from "../product-index-cli.js";
 
-function writeGraph(projectRoot: string): void {
+const shardId = "home";
+
+const graph: KnowledgeGraph = {
+  version: "1.0.0",
+  project: {
+    name: "video-app",
+    languages: ["java"],
+    frameworks: ["Android"],
+    description: "Video app",
+    analyzedAt: "2026-05-19T00:00:00.000Z",
+    gitCommitHash: "abc123",
+  },
+  nodes: [
+    {
+      id: "file:app/BootBroadcastReceiver.java",
+      type: "file",
+      name: "BootBroadcastReceiver.java",
+      filePath: "app/BootBroadcastReceiver.java",
+      summary: "Boot receiver source file.",
+      tags: ["receiver"],
+      complexity: "simple",
+      businessSignals: [
+        { type: "entry", text: "开机广播入口" },
+        { type: "behavior", text: "接收开机广播并启动后续处理" },
+      ],
+    },
+    {
+      id: "function:BootBroadcastReceiver.java:onReceive",
+      type: "function",
+      name: "onReceive",
+      filePath: "app/BootBroadcastReceiver.java",
+      lineRange: [18, 21],
+      summary: "Receives boot broadcasts.",
+      tags: ["receiver"],
+      complexity: "simple",
+      businessSignals: [
+        { type: "behavior", text: "接收开机广播并启动后续处理" },
+      ],
+    },
+  ],
+  edges: [
+    {
+      source: "file:app/BootBroadcastReceiver.java",
+      target: "function:BootBroadcastReceiver.java:onReceive",
+      type: "contains",
+      direction: "forward",
+      weight: 1,
+    },
+  ],
+  layers: [],
+  tour: [],
+};
+
+function writeJson(path: string, value: unknown): void {
+  mkdirSync(dirname(path), { recursive: true });
+  writeFileSync(path, JSON.stringify(value, null, 2), "utf-8");
+}
+
+function writeShardedProject(projectRoot: string): void {
   const dir = join(projectRoot, ".understand-anything");
   mkdirSync(dir, { recursive: true });
-  const graph: KnowledgeGraph = {
+  writeJson(join(dir, "knowledge-graph.json"), {
     version: "1.0.0",
-    project: {
-      name: "video-app",
-      languages: ["java"],
-      frameworks: ["Android"],
-      description: "Video app",
-      analyzedAt: "2026-05-19T00:00:00.000Z",
-      gitCommitHash: "abc123",
-    },
-    nodes: [
-      {
-        id: "file:app/BootBroadcastReceiver.java",
-        type: "file",
-        name: "BootBroadcastReceiver.java",
-        filePath: "app/BootBroadcastReceiver.java",
-        summary: "Boot receiver source file.",
-        tags: ["receiver"],
-        complexity: "simple",
-      },
-      {
-        id: "function:BootBroadcastReceiver.java:onReceive",
-        type: "function",
-        name: "onReceive",
-        filePath: "app/BootBroadcastReceiver.java",
-        lineRange: [18, 21],
-        summary: "Receives boot broadcasts.",
-        tags: ["receiver"],
-        complexity: "simple",
-        businessSignals: [
-          { type: "behavior", text: "接收开机广播并启动后续处理" },
-        ],
-      },
-    ],
-    edges: [
-      {
-        source: "file:app/BootBroadcastReceiver.java",
-        target: "function:BootBroadcastReceiver.java:onReceive",
-        type: "contains",
-        direction: "forward",
-        weight: 1,
-      },
-    ],
-    layers: [],
-    tour: [],
-  };
-  writeFileSync(
-    join(dir, "knowledge-graph.json"),
-    JSON.stringify(graph, null, 2),
-    "utf-8",
+    kind: "codebase-sharded",
+    shards: [{ id: shardId, path: `shards/${shardId}.json` }],
+  });
+  writeJson(join(dir, "shards", `${shardId}.json`), graph);
+}
+
+function intermediateDir(projectRoot: string): string {
+  return join(
+    projectRoot,
+    ".understand-anything",
+    "intermediate",
+    "product-shards",
+    shardId,
   );
 }
 
 function expectNoFinalOutputs(projectRoot: string): void {
   expect(
-    existsSync(join(projectRoot, ".understand-anything/product-signals.jsonl")),
+    existsSync(
+      join(projectRoot, ".understand-anything", "product-shards", `${shardId}.json`),
+    ),
   ).toBe(false);
   expect(
-    existsSync(join(projectRoot, ".understand-anything/product-index.json")),
+    existsSync(join(projectRoot, ".understand-anything", "product-index.json")),
   ).toBe(false);
 }
 
 describe("grounded product index cli", () => {
   it("prepares boundary candidates without writing context packs or final facts", async () => {
     const projectRoot = mkdtempSync(join(tmpdir(), "ua-product-prepare-"));
-    writeGraph(projectRoot);
+    writeShardedProject(projectRoot);
 
     const result = await runProductIndexCli([
       projectRoot,
       "--prepare-candidates",
       "--platform",
       "android",
+      "--shard",
+      shardId,
     ]);
 
     expect(result.contextPacks).toBe(0);
@@ -88,38 +115,41 @@ describe("grounded product index cli", () => {
     expect(result.evidence).toBe(0);
     expect(
       existsSync(
-        join(
-          projectRoot,
-          ".understand-anything/intermediate/product-boundary-candidates.json",
-        ),
+        join(intermediateDir(projectRoot), "product-boundary-candidates.json"),
       ),
     ).toBe(true);
     expect(
       existsSync(
-        join(
-          projectRoot,
-          ".understand-anything/intermediate/product-context-packs.json",
-        ),
+        join(intermediateDir(projectRoot), "product-context-packs.json"),
       ),
     ).toBe(false);
     expect(
-      existsSync(join(projectRoot, ".understand-anything/product-index.json")),
+      existsSync(
+        join(projectRoot, ".understand-anything", "product-shards", `${shardId}.json`),
+      ),
     ).toBe(false);
   });
 
   it("builds context packs from llm-normalized topics", async () => {
     const projectRoot = mkdtempSync(join(tmpdir(), "ua-product-context-"));
-    writeGraph(projectRoot);
-    await runProductIndexCli([projectRoot, "--prepare-candidates", "--platform", "android"]);
+    writeShardedProject(projectRoot);
+    await runProductIndexCli([
+      projectRoot,
+      "--prepare-candidates",
+      "--platform",
+      "android",
+      "--shard",
+      shardId,
+    ]);
 
     const candidates = JSON.parse(
       readFileSync(
-        join(projectRoot, ".understand-anything/intermediate/product-boundary-candidates.json"),
+        join(intermediateDir(projectRoot), "product-boundary-candidates.json"),
         "utf-8",
       ),
     );
     writeFileSync(
-      join(projectRoot, ".understand-anything/intermediate/product-topic-normalization.json"),
+      join(intermediateDir(projectRoot), "product-topic-normalization.json"),
       JSON.stringify(
         {
           topics: [
@@ -149,12 +179,14 @@ describe("grounded product index cli", () => {
       "--build-context-packs",
       "--platform",
       "android",
+      "--shard",
+      shardId,
     ]);
 
     expect(result.contextPacks).toBe(1);
     const packs = JSON.parse(
       readFileSync(
-        join(projectRoot, ".understand-anything/intermediate/product-context-packs.json"),
+        join(intermediateDir(projectRoot), "product-context-packs.json"),
         "utf-8",
       ),
     );
@@ -163,8 +195,9 @@ describe("grounded product index cli", () => {
     const perTopicPack = JSON.parse(
       readFileSync(
         join(
-          projectRoot,
-          ".understand-anything/intermediate/product-context-packs-by-topic/topic_boot-startup.json",
+          intermediateDir(projectRoot),
+          "product-context-packs-by-topic",
+          "topic_boot-startup.json",
         ),
         "utf-8",
       ),
@@ -174,16 +207,23 @@ describe("grounded product index cli", () => {
 
   it("finalizes product index from per-topic extraction files", async () => {
     const projectRoot = mkdtempSync(join(tmpdir(), "ua-product-finalize-"));
-    writeGraph(projectRoot);
-    await runProductIndexCli([projectRoot, "--prepare-candidates", "--platform", "android"]);
+    writeShardedProject(projectRoot);
+    await runProductIndexCli([
+      projectRoot,
+      "--prepare-candidates",
+      "--platform",
+      "android",
+      "--shard",
+      shardId,
+    ]);
     const candidates = JSON.parse(
       readFileSync(
-        join(projectRoot, ".understand-anything/intermediate/product-boundary-candidates.json"),
+        join(intermediateDir(projectRoot), "product-boundary-candidates.json"),
         "utf-8",
       ),
     );
     writeFileSync(
-      join(projectRoot, ".understand-anything/intermediate/product-topic-normalization.json"),
+      join(intermediateDir(projectRoot), "product-topic-normalization.json"),
       JSON.stringify(
         {
           topics: [
@@ -207,28 +247,30 @@ describe("grounded product index cli", () => {
       ),
       "utf-8",
     );
-    await runProductIndexCli([projectRoot, "--build-context-packs", "--platform", "android"]);
+    await runProductIndexCli([
+      projectRoot,
+      "--build-context-packs",
+      "--platform",
+      "android",
+      "--shard",
+      shardId,
+    ]);
 
     const packs = JSON.parse(
       readFileSync(
-        join(
-          projectRoot,
-          ".understand-anything/intermediate/product-context-packs.json",
-        ),
+        join(intermediateDir(projectRoot), "product-context-packs.json"),
         "utf-8",
       ),
     );
     mkdirSync(
-      join(
-        projectRoot,
-        ".understand-anything/intermediate/product-index-extractions-by-topic",
-      ),
+      join(intermediateDir(projectRoot), "product-index-extractions-by-topic"),
       { recursive: true },
     );
     writeFileSync(
       join(
-        projectRoot,
-        ".understand-anything/intermediate/product-index-extractions-by-topic/topic_boot-startup.json",
+        intermediateDir(projectRoot),
+        "product-index-extractions-by-topic",
+        "topic_boot-startup.json",
       ),
       JSON.stringify(
         {
@@ -268,6 +310,8 @@ describe("grounded product index cli", () => {
       "--finalize",
       "--platform",
       "android",
+      "--shard",
+      shardId,
     ]);
 
     expect(result.topics).toBe(1);
@@ -275,19 +319,19 @@ describe("grounded product index cli", () => {
     expect(result.evidence).toBe(1);
     expect(
       existsSync(
-        join(
-          projectRoot,
-          ".understand-anything/intermediate/product-index-extractions.json",
-        ),
+        join(intermediateDir(projectRoot), "product-index-extractions.json"),
       ),
     ).toBe(true);
     expect(
       existsSync(
-        join(projectRoot, ".understand-anything/product-index.json"),
+        join(projectRoot, ".understand-anything", "product-shards", `${shardId}.json`),
       ),
     ).toBe(true);
     const trace = JSON.parse(
-      readFileSync(join(projectRoot, ".understand-anything/product-index-trace.json"), "utf-8"),
+      readFileSync(
+        join(projectRoot, ".understand-anything", "product-traces", `${shardId}.json`),
+        "utf-8",
+      ),
     );
     expect(trace.mode).toBe("llm-strict");
     expect(trace.boundaryCandidates.length).toBeGreaterThan(0);
@@ -304,9 +348,11 @@ describe("grounded product index cli", () => {
       ["--build-context-packs", "--finalize"],
     ]) {
       const projectRoot = mkdtempSync(join(tmpdir(), "ua-product-conflict-"));
-      writeGraph(projectRoot);
+      writeShardedProject(projectRoot);
 
-      await expect(runProductIndexCli([projectRoot, ...args])).rejects.toThrow(
+      await expect(
+        runProductIndexCli([projectRoot, ...args, "--shard", shardId]),
+      ).rejects.toThrow(
         /Choose only one of --prepare-candidates, --build-context-packs, or --finalize\./,
       );
       expectNoFinalOutputs(projectRoot);
@@ -315,7 +361,7 @@ describe("grounded product index cli", () => {
 
   it("rejects fast and default fallback paths", async () => {
     const projectRoot = mkdtempSync(join(tmpdir(), "ua-product-strict-"));
-    writeGraph(projectRoot);
+    writeShardedProject(projectRoot);
 
     await expect(runProductIndexCli([projectRoot, "--platform", "android"])).rejects.toThrow(
       /Please run through \/understand-product or specify one stage:/,
@@ -328,16 +374,23 @@ describe("grounded product index cli", () => {
 
   it("reports a clear error when finalizing without context packs", async () => {
     const projectRoot = mkdtempSync(join(tmpdir(), "ua-product-no-packs-"));
-    writeGraph(projectRoot);
-    await runProductIndexCli([projectRoot, "--prepare-candidates", "--platform", "android"]);
+    writeShardedProject(projectRoot);
+    await runProductIndexCli([
+      projectRoot,
+      "--prepare-candidates",
+      "--platform",
+      "android",
+      "--shard",
+      shardId,
+    ]);
     const candidates = JSON.parse(
       readFileSync(
-        join(projectRoot, ".understand-anything/intermediate/product-boundary-candidates.json"),
+        join(intermediateDir(projectRoot), "product-boundary-candidates.json"),
         "utf-8",
       ),
     );
     writeFileSync(
-      join(projectRoot, ".understand-anything/intermediate/product-topic-normalization.json"),
+      join(intermediateDir(projectRoot), "product-topic-normalization.json"),
       JSON.stringify(
         {
           topics: [
@@ -363,7 +416,14 @@ describe("grounded product index cli", () => {
     );
 
     await expect(
-      runProductIndexCli([projectRoot, "--finalize", "--platform", "android"]),
+      runProductIndexCli([
+        projectRoot,
+        "--finalize",
+        "--platform",
+        "android",
+        "--shard",
+        shardId,
+      ]),
     ).rejects.toThrow(
       /product-context-packs\.json not found\. 请先运行 \/understand-product --build-context-packs。/,
     );
@@ -371,16 +431,23 @@ describe("grounded product index cli", () => {
 
   it("reports a clear error when finalizing without extraction output", async () => {
     const projectRoot = mkdtempSync(join(tmpdir(), "ua-product-no-extractions-"));
-    writeGraph(projectRoot);
-    await runProductIndexCli([projectRoot, "--prepare-candidates", "--platform", "android"]);
+    writeShardedProject(projectRoot);
+    await runProductIndexCli([
+      projectRoot,
+      "--prepare-candidates",
+      "--platform",
+      "android",
+      "--shard",
+      shardId,
+    ]);
     const candidates = JSON.parse(
       readFileSync(
-        join(projectRoot, ".understand-anything/intermediate/product-boundary-candidates.json"),
+        join(intermediateDir(projectRoot), "product-boundary-candidates.json"),
         "utf-8",
       ),
     );
     writeFileSync(
-      join(projectRoot, ".understand-anything/intermediate/product-topic-normalization.json"),
+      join(intermediateDir(projectRoot), "product-topic-normalization.json"),
       JSON.stringify(
         {
           topics: [
@@ -404,10 +471,24 @@ describe("grounded product index cli", () => {
       ),
       "utf-8",
     );
-    await runProductIndexCli([projectRoot, "--build-context-packs", "--platform", "android"]);
+    await runProductIndexCli([
+      projectRoot,
+      "--build-context-packs",
+      "--platform",
+      "android",
+      "--shard",
+      shardId,
+    ]);
 
     await expect(
-      runProductIndexCli([projectRoot, "--finalize", "--platform", "android"]),
+      runProductIndexCli([
+        projectRoot,
+        "--finalize",
+        "--platform",
+        "android",
+        "--shard",
+        shardId,
+      ]),
     ).rejects.toThrow(
       /product-index-extractions-by-topic\/\*\.json or product-index-extractions\.json not found\. LLM analyzer did not write extraction output\./,
     );

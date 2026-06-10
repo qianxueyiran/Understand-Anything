@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildResult } from "../../skills/understand/extract-structure.mjs";
+import { buildResult, resolveProjectRoot } from "../../skills/understand/extract-structure.mjs";
 
 const file = (overrides = {}) => ({
   path: "src/foo.py",
@@ -17,6 +17,18 @@ const analysis = (overrides = {}) => ({
 });
 
 describe("extract-structure buildResult", () => {
+  describe("projectRoot resolution", () => {
+    it("prefers explicit projectRoot in input", () => {
+      const result = resolveProjectRoot("/tmp/project", "/tmp/project/.understand-anything/tmp/in.json");
+      expect(result).toBe("/tmp/project");
+    });
+
+    it("infers projectRoot from ua batch input path", () => {
+      const result = resolveProjectRoot("", "/tmp/project/.understand-anything/tmp/ua-file-analyzer-input-1.json");
+      expect(result).toBe("/tmp/project");
+    });
+  });
+
   describe("language pass-through", () => {
     it("preserves the input language on the output", () => {
       const result = buildResult(file({ language: "python" }), 10, 8, analysis(), null, {});

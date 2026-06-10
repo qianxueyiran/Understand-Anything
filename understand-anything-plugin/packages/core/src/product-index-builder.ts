@@ -58,6 +58,16 @@ export interface NormalizedProductTopic {
   domainRefs: string[];
 }
 
+/** Topic metadata embedded in analyzer-facing context packs (no normalization audit fields). */
+export interface ContextPackTopic {
+  id: string;
+  name: string;
+  summary: string;
+  kind: ProductTopicKind;
+  rootNodeIds: string[];
+  domainRefs: string[];
+}
+
 export interface ProductContextAnchor {
   anchorId: string;
   nodeId: string;
@@ -79,10 +89,10 @@ export interface ProductContextFile {
 }
 
 export interface TopicContextPack {
-  topic: NormalizedProductTopic;
-  roots: string[];
+  topic: ContextPackTopic;
   candidateFiles: ProductContextFile[];
-  overflowFiles: string[];
+  /** Present on aggregate `product-context-packs.json` for review/trace counts only. */
+  overflowFileCount?: number;
 }
 
 export interface ProductExtractionFact {
@@ -270,13 +280,15 @@ const DEFAULT_MAX_NODES_PER_TOPIC = 160;
 const DEFAULT_MAX_FRONTIER_PER_DEPTH = 32;
 const DEFAULT_MAX_EVIDENCE_PER_TOPIC = 50;
 const DEFAULT_HUB_DEGREE_THRESHOLD = 80;
-const DEFAULT_MAX_BOUNDARY_NEIGHBORS = 16;
-const DEFAULT_MAX_FILES_PER_TOPIC = 30;
-const DEFAULT_MAX_ANCHORS_PER_FILE = 5;
-const RECALL_MAX_DEPTH = 6;
+const DEFAULT_MAX_BOUNDARY_NEIGHBORS = 8;
+const DEFAULT_MAX_FILES_PER_TOPIC = 15;
+const DEFAULT_MAX_ANCHORS_PER_FILE = 3;
+const RECALL_MAX_DEPTH = 4;
 const STRONG_HUB_PRODUCT_SCORE = 0.7;
 const HUB_SCORE_PENALTY = 0.25;
 const BOUNDARY_SIGNAL_TYPES = new Set(["entry", "display", "rule", "data", "integration"]);
+const BOUNDARY_QUALIFYING_SIGNAL_TYPES = new Set(["entry", "integration"]);
+const PRODUCT_ROLE_BOUNDARY_PATTERN = /(Activity|Fragment|Presenter|Provider|Manager|Service|Receiver)/i;
 const COMMON_DOMAIN_TOKENS = new Set([
   "activity",
   "fragment",
@@ -371,7 +383,6 @@ export function buildProductBoundaryCandidates(
   domainGraph?: KnowledgeGraph,
   options: ProductBoundaryCandidateOptions = {},
 ): ProductBoundaryCandidate[] {
-  const patterns = compileEntryPatterns(graph, options);
   const adjacency = buildAdjacency(graph.edges);
   const maxNeighbors = options.maxNeighborNodeIds ?? DEFAULT_MAX_BOUNDARY_NEIGHBORS;
   const nodesByFilePath = groupNodesByFilePath(graph.nodes);
@@ -386,16 +397,11 @@ export function buildProductBoundaryCandidates(
       const businessSignals = uniqueBusinessSignals(
         fileNodes.flatMap((fileNode) => fileNode.businessSignals ?? []),
       );
-      const boundarySignals = businessSignals.filter((signal) => BOUNDARY_SIGNAL_TYPES.has(signal.type));
-      const entryCandidate = isEntryCandidate(node, patterns);
-      if (!entryCandidate && boundarySignals.length === 0) {
+      if (!qualifiesProductBoundaryCandidate(node, businessSignals)) {
         return undefined;
       }
 
-      const entryKind = entryCandidate ? inferEntryKind(node) : boundarySignals[0]?.type ?? "entry";
-      if (businessSignals.length === 0 && entryKind === "entry") {
-        return undefined;
-      }
+      const entryKind = inferBoundaryEntryKind(node, businessSignals);
 
       const domainCandidates = [
         node.name,
@@ -479,13 +485,33 @@ export function buildTopicContextPacks(
       .map(([filePath, items]) => buildProductContextFile(filePath, items, maxAnchors))
       .sort((a, b) => contextFileRank(b) - contextFileRank(a) || a.filePath.localeCompare(b.filePath));
 
+    const overflowFileCount = Math.max(0, files.length - maxFiles);
+
     return {
-      topic,
-      roots: topic.rootNodeIds.filter((rootNodeId) => nodeById.has(rootNodeId)),
+      topic: slimTopicForContextPack(topic),
       candidateFiles: files.slice(0, maxFiles),
-      overflowFiles: files.slice(maxFiles).map((file) => file.filePath),
+      ...(overflowFileCount > 0 ? { overflowFileCount } : {}),
     };
   });
+}
+
+function slimTopicForContextPack(topic: NormalizedProductTopic): ContextPackTopic {
+  return {
+    id: topic.id,
+    name: topic.name,
+    summary: topic.summary,
+    kind: topic.kind,
+    rootNodeIds: topic.rootNodeIds,
+    domainRefs: topic.domainRefs,
+  };
+}
+
+/** Per-topic analyzer input: no review-only overflow counts. */
+export function toAnalyzerContextPack(pack: TopicContextPack): TopicContextPack {
+  return {
+    topic: pack.topic,
+    candidateFiles: pack.candidateFiles,
+  };
 }
 
 export function finalizeGroundedProductIndex(input: FinalizeGroundedProductIndexInput): ProductIndex {
@@ -650,7 +676,7 @@ export function finalizeGroundedProductIndex(input: FinalizeGroundedProductIndex
     quality: {
       groundedFacts: outputFacts.length,
       ignoredFiles: extractions.reduce((count, extraction) => count + extraction.ignoredFiles.length, 0),
-      overflowFiles: contextPacks.reduce((count, pack) => count + pack.overflowFiles.length, 0),
+      overflowFiles: contextPacks.reduce((count, pack) => count + (pack.overflowFileCount ?? 0), 0),
     },
   };
 }
@@ -1055,6 +1081,48 @@ function isEntryCandidate(node: GraphNode, patterns: RegExp[]): boolean {
   );
 }
 
+function hasBoundaryQualifyingSignal(
+  businessSignals: Array<{ type: string; text: string }>,
+): boolean {
+  return businessSignals.some((signal) => BOUNDARY_QUALIFYING_SIGNAL_TYPES.has(signal.type));
+}
+
+function matchesProductRoleBoundary(node: GraphNode): boolean {
+  if (NON_ENTRY_NAME_PATTERNS.some((pattern) => pattern.test(node.name))) {
+    return false;
+  }
+
+  const basename = basenameWithoutExtension(node.filePath ?? "") ?? "";
+  const haystack = `${node.name} ${basename}`;
+  return PRODUCT_ROLE_BOUNDARY_PATTERN.test(haystack);
+}
+
+function qualifiesProductBoundaryCandidate(
+  node: GraphNode,
+  businessSignals: Array<{ type: string; text: string }>,
+): boolean {
+  if (businessSignals.length < 2) {
+    return false;
+  }
+
+  return hasBoundaryQualifyingSignal(businessSignals) || matchesProductRoleBoundary(node);
+}
+
+function inferBoundaryEntryKind(
+  node: GraphNode,
+  businessSignals: Array<{ type: string; text: string }>,
+): string {
+  if (matchesProductRoleBoundary(node)) {
+    return inferEntryKind(node);
+  }
+
+  if (businessSignals.some((signal) => signal.type === "entry")) {
+    return inferEntryKind(node);
+  }
+
+  return "integration";
+}
+
 function buildNameCandidates(node: GraphNode): string[] {
   return uniqueStrings([node.name, basenameWithoutExtension(node.filePath), node.filePath].filter(isString));
 }
@@ -1399,8 +1467,26 @@ function normalizeContextAnchorSignalType(
 }
 
 export function normalizeLoadedContextPack(pack: TopicContextPack): TopicContextPack {
+  const legacyPack = pack as TopicContextPack & {
+    roots?: string[];
+    overflowFiles?: string[];
+    topic?: ContextPackTopic & { sourceCandidateIds?: string[] };
+  };
+  const topic = legacyPack.topic ?? pack.topic;
+  const overflowFileCount =
+    pack.overflowFileCount ??
+    (legacyPack.overflowFiles?.length ? legacyPack.overflowFiles.length : undefined);
+
   return {
-    ...pack,
+    topic: slimTopicForContextPack({
+      id: topic.id,
+      name: topic.name,
+      summary: topic.summary,
+      kind: topic.kind,
+      sourceCandidateIds: topic.sourceCandidateIds ?? [],
+      rootNodeIds: topic.rootNodeIds,
+      domainRefs: topic.domainRefs ?? [],
+    }),
     candidateFiles: pack.candidateFiles.map((file) => ({
       ...file,
       anchors: file.anchors.map((anchor) => {
@@ -1412,6 +1498,7 @@ export function normalizeLoadedContextPack(pack: TopicContextPack): TopicContext
         return { ...rest, signalType };
       }),
     })),
+    ...(overflowFileCount && overflowFileCount > 0 ? { overflowFileCount } : {}),
   };
 }
 

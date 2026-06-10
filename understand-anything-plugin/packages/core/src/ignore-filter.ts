@@ -60,6 +60,9 @@ export const DEFAULT_IGNORE_PATTERNS: string[] = [
   ".idea/",
   ".vscode/",
 
+  // Local agent/skill workspaces
+  ".agents/",
+
   // Misc
   "LICENSE",
   ".gitignore",

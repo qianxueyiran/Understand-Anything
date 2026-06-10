@@ -84,6 +84,11 @@ describe("IgnoreFilter", () => {
       expect(filter.isIgnored(".idea/workspace.xml")).toBe(true);
       expect(filter.isIgnored(".vscode/settings.json")).toBe(true);
     });
+
+    it("ignores local agent skill directories", () => {
+      const filter = createIgnoreFilter(testDir);
+      expect(filter.isIgnored(".agents/skills/lark-doc/references/lark-doc-update.md")).toBe(true);
+    });
   });
 
   describe("createIgnoreFilter with user .understandignore", () => {

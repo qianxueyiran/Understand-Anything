@@ -20,8 +20,7 @@ import { createRequire } from 'node:module';
 import { dirname, resolve, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
-const __filename = fileURLToPath(import.meta.url);
-import { readFileSync, writeFileSync } from 'node:fs';
+import { readFileSync, realpathSync, writeFileSync } from 'node:fs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 // skills/understand/ -> plugin root is two dirs up
@@ -45,6 +44,21 @@ try {
 
 const { TreeSitterPlugin, PluginRegistry, builtinLanguageConfigs, registerAllParsers } = core;
 
+export function resolveProjectRoot(projectRoot, inputPath) {
+  if (typeof projectRoot === 'string' && projectRoot.trim().length > 0) {
+    return projectRoot;
+  }
+
+  const normalizedInputPath = resolve(inputPath).replace(/\\/gu, '/');
+  const marker = '/.understand-anything/tmp/';
+  const markerIndex = normalizedInputPath.lastIndexOf(marker);
+  if (markerIndex !== -1) {
+    return normalizedInputPath.slice(0, markerIndex);
+  }
+
+  throw new Error('Invalid input: must contain projectRoot and batchFiles array');
+}
+
 // ---------------------------------------------------------------------------
 // Main
 // ---------------------------------------------------------------------------
@@ -60,9 +74,10 @@ async function main() {
   const input = JSON.parse(inputRaw);
   const { projectRoot, batchFiles, batchImportData } = input;
 
-  if (!projectRoot || !Array.isArray(batchFiles)) {
+  if (!Array.isArray(batchFiles)) {
     throw new Error('Invalid input: must contain projectRoot and batchFiles array');
   }
+  const resolvedProjectRoot = resolveProjectRoot(projectRoot, inputPath);
 
   // Create tree-sitter plugin with all configs that have WASM grammars
   const tsConfigs = builtinLanguageConfigs.filter(c => c.treeSitter);
@@ -78,7 +93,7 @@ async function main() {
   const filesSkipped = [];
 
   for (const file of batchFiles) {
-    const absolutePath = join(projectRoot, file.path);
+    const absolutePath = join(resolvedProjectRoot, file.path);
 
     // Read file content
     let content;
@@ -304,13 +319,25 @@ export function buildResult(file, totalLines, nonEmptyLines, analysis, callGraph
 // ---------------------------------------------------------------------------
 // Run only when executed directly as a CLI; importing the module (e.g. from
 // tests) must not trigger main().
+//
+// Canonicalize both sides through realpathSync. Node ESM resolves
+// import.meta.url through symlinks but process.argv[1] preserves them, so a
+// raw resolve() equality check silently no-ops when the script is invoked via
+// a symlinked plugin install path (the default in Claude Code / Copilot CLI
+// caches). See GitHub issue #162.
 // ---------------------------------------------------------------------------
-// path.resolve handles symlinks / relative argv on macOS & Windows
-const isCli =
-  process.argv[1] &&
-  resolve(process.argv[1]) === resolve(__filename);
+function isCliEntry() {
+  if (!process.argv[1]) return false;
+  try {
+    const modulePath = realpathSync(fileURLToPath(import.meta.url));
+    const argvPath = realpathSync(process.argv[1]);
+    return modulePath === argvPath;
+  } catch {
+    return false;
+  }
+}
 
-if (isCli) {
+if (isCliEntry()) {
   try {
     await main();
   } catch (err) {

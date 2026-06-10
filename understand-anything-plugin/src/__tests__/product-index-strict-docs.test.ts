@@ -5,6 +5,10 @@ const skill = readFileSync(
   new URL("../../skills/understand-product/SKILL.md", import.meta.url),
   "utf-8",
 );
+const workflow = readFileSync(
+  new URL("../../skills/understand-product/product-shard-workflow.md", import.meta.url),
+  "utf-8",
+);
 const analyzer = readFileSync(
   new URL("../../agents/product-index-analyzer.md", import.meta.url),
   "utf-8",
@@ -15,10 +19,10 @@ const normalizer = readFileSync(
 );
 
 function skillPhase(title: string) {
-  const start = skill.indexOf(title);
+  const start = workflow.indexOf(title);
   expect(start).toBeGreaterThanOrEqual(0);
-  const next = skill.indexOf("\n## Phase ", start + title.length);
-  return next === -1 ? skill.slice(start) : skill.slice(start, next);
+  const next = workflow.indexOf("\n## Phase ", start + title.length);
+  return next === -1 ? workflow.slice(start) : workflow.slice(start, next);
 }
 
 describe("understand-product strict docs", () => {
@@ -26,9 +30,11 @@ describe("understand-product strict docs", () => {
     expect(skill).toContain("正式流程是 shard-only");
     expect(skill).toContain("/understand-product --shard <id>");
     expect(skill).toContain("/understand-product --refresh-shards");
+    expect(skill).toContain("product-shard-workflow.md");
+    expect(workflow).toContain("# Product Shard Workflow");
     expect(skill).toContain("product-shards/<id>.json");
     expect(skill).toContain("product-traces/<id>.json");
-    expect(skill).toContain("product-shards/<id>.signals.jsonl");
+    expect(workflow).toContain("product-shards/<id>.signals.jsonl");
     expect(skill).not.toContain("非 shard 模式");
     expect(skill).not.toContain("product-index-trace.json");
     expect(skill).not.toContain("product-signals.jsonl");
@@ -36,9 +42,9 @@ describe("understand-product strict docs", () => {
 
   it("documents strict phase order and removes fast fallback usage", () => {
     expect(skill).toContain("product-topic-normalizer.md");
-    expect(skill).toContain("--prepare-candidates");
-    expect(skill).toContain("--build-context-packs");
-    expect(skill).toContain("--finalize");
+    expect(workflow).toContain("--prepare-candidates");
+    expect(workflow).toContain("--build-context-packs");
+    expect(workflow).toContain("--finalize");
     expect(skill).not.toContain("node \"$PLUGIN_ROOT/dist/product-index-cli.js\" \"$PROJECT_ROOT\" --fast");
     expect(skill).not.toContain("跳过 LLM 抽取");
     expect(skill).toContain("不要使用 `--fast`");
@@ -48,11 +54,11 @@ describe("understand-product strict docs", () => {
     expect(skill).toContain("--shard <id>");
     expect(skill).toContain("--refresh-shards");
     expect(skill).toContain("product-shards/<id>.json");
-    expect(skill).toContain("intermediate/product-shards/<id>");
+    expect(workflow).toContain("intermediate/product-shards/<id>");
     expect(skill).toContain("product-traces/<id>.json");
-    expect(skill).toContain("--finalize --shard <id>");
-    expect(skill).toContain("CLI 会自动刷新");
-    expect(skill).toContain("--refresh-shards` 仍可用于重新扫描");
+    expect(workflow).toContain("--finalize --shard <id>");
+    expect(workflow).toContain("CLI 会自动刷新");
+    expect(workflow).toContain("--refresh-shards` 仍可用于重新扫描");
   });
 
   it("documents shard-specific paths in each product phase", () => {
@@ -112,7 +118,7 @@ describe("understand-product strict docs", () => {
     expect(analyzer).toContain("输入路径");
     expect(analyzer).toContain("输出路径");
     expect(analyzer).toContain("调度 prompt");
-    expect(skill).toContain("逐个 topic 派发");
+    expect(workflow).toContain("逐个 topic 派发");
     expect(analyzer).toContain("读取你认为与当前 topic 相关的 `candidateFiles[].filePath` 源码");
     expect(analyzer).toContain("只能读取当前 topic 的 `candidateFiles`");
     expect(analyzer).toContain("`behavior`、`rule`、`display`、`data`、`integration`、`mapping`、`lifecycle`");

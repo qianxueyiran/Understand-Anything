@@ -809,7 +809,13 @@ function isUnsafeRelativePath(filePath: string): boolean {
   );
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+import { pathToFileURL } from "node:url";
+
+const isMain =
+  process.argv[1] &&
+  import.meta.url === pathToFileURL(process.argv[1]).href;
+
+if (isMain) {
   runProductIndexCli(process.argv.slice(2))
     .then((result) => {
       console.log(JSON.stringify(result, null, 2));

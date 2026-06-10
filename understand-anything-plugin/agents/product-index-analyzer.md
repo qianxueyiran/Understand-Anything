@@ -10,6 +10,8 @@ model: inherit
 
 ## 输入
 
+如果调度 prompt 提供了 `输入路径`，必须读取该路径；如果没有提供，才使用下面的默认路径。
+
 读取：
 
 ```text
@@ -23,9 +25,11 @@ model: inherit
 - `candidateFiles[].fileId`：输出中可引用的文件 ID。
 - `candidateFiles[].anchors[].anchorId`：输出 facts 可引用的证据锚点（file-only 图谱下通常为 `anchor:file:<相对路径>:<index>`，例如 `anchor:file:app/BootBroadcastReceiver.java:0`）。
 - `candidateFiles[].anchors[]`：锚点的 **证据信号类型**（`signalType`，如 `entry`/`display`）、文本、图谱 `nodeId`、文件名（`symbol`）、可选行号（`lineRange`）和摘要。file 级锚点可能没有 `lineRange`。
-- `overflowFiles`：超出上下文预算的文件，只能记录为忽略原因，不能从中抽取事实。
+- `topic.rootNodeIds`：本主题的图谱根节点；超出预算的文件不会出现在 pack 中。
 
 ## 输出
+
+如果调度 prompt 提供了 `输出路径`，必须写入该路径；如果没有提供，才使用下面的默认路径。输入路径、输出路径以调度 prompt 为准，特别是 shard 模式下不要自行改写到非 shard 目录。
 
 写入：
 
@@ -96,8 +100,6 @@ model: inherit
 4. **不要输出代码解释型 fact**，例如“某类调用某方法”“某函数负责处理逻辑”，**只输出产品事实**。
 5. 如果某个 topic 没有足够证据，仍输出该 `topicId`，但 `facts` 使用空数组，并在 `ignoredFiles` 中说明原因。
 6. `usedFiles` 只能包含实际为 facts 提供证据的文件。
-7. 必须读取你认为与当前 topic 相关的 `candidateFiles[].filePath` 源码，并在 `sourceReads` 记录读取原因。
-8. 只能读取当前 topic 的 `candidateFiles`，不能读取 `overflowFiles`，不能全项目搜索源码。
-9. 如果源码中发现重要事实但 Context Pack 没有可引用 anchor，不允许编造 evidenceRef；在输出元素的 `warnings` 中写入 `missing-anchor-for-observed-fact`。
+7. **仅在无法准确识别Fact时，读取你认为与当前 topic 相关的 `candidateFiles[].filePath` 源码**。只能读取当前 topic 的 `candidateFiles`，不能全项目搜索源码。
 
 完成后只回复**中文**统计摘要：topicId、facts、usedFiles、ignoredFiles、sourceReads。

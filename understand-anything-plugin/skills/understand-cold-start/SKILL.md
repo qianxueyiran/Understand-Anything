@@ -6,7 +6,7 @@ argument-hint: [--config <path>] [--resume] [--continue-on-error]
 
 # /understand-cold-start
 
-根据用户维护的分片配置，为大型项目建立第一批分析产物。这个 skill 只做编排：读取配置、按顺序执行已有分片命令，然后校验生成的 code graph 和 product index 产物。
+根据用户维护的分片配置，为大型项目建立第一批分析产物。这个 skill 只做编排：读取配置、在主上下文内联执行每个 code shard 的共享 workflow、按顺序生成 product shards，然后校验产物。
 
 ## 配置
 
@@ -41,7 +41,7 @@ argument-hint: [--config <path>] [--resume] [--continue-on-error]
 ## Phase 0: 解析路径
 
 1. 将 `PROJECT_ROOT` 设为当前工作目录。
-2. 按 `/understand-domain` 的策略解析 `PLUGIN_ROOT`：优先使用 `${CLAUDE_PLUGIN_ROOT}`，然后尝试 `$HOME/.understand-anything-plugin`、从 skill symlink 推导出的根目录，以及各平台常见安装路径。
+2. 解析 `PLUGIN_ROOT`：优先使用运行时注入的 plugin root，然后尝试 `$HOME/.understand-anything-plugin`、从当前 skill 文件位置解析出的 plugin root，以及各平台常见安装路径。
 3. 解析 `CONFIG_PATH`：
    - 如果 `$ARGUMENTS` 包含 `--config <path>`，使用该路径。
    - 否则使用 `$PROJECT_ROOT/.understand-anything/scope-shards.json`。
@@ -52,54 +52,79 @@ argument-hint: [--config <path>] [--resume] [--continue-on-error]
 运行确定性 helper：
 
 ```bash
-python "$PLUGIN_ROOT/skills/understand-cold-start/cold-start-workflow.py" plan "$PROJECT_ROOT" "$CONFIG_PATH" "$PROJECT_ROOT/.understand-anything/cold-start-plan.json"
+python3 "$PLUGIN_ROOT/skills/understand-cold-start/cold-start-workflow.py" plan "$PROJECT_ROOT" "$CONFIG_PATH" "$PROJECT_ROOT/.understand-anything/cold-start-plan.json"
+python3 "$PLUGIN_ROOT/skills/understand-cold-start/cold-start-workflow.py" init "$PROJECT_ROOT" "$CONFIG_PATH" "$PROJECT_ROOT/.understand-anything/cold-start-run.json"
 ```
 
-然后读取 `.understand-anything/cold-start-plan.json` 并报告：
+然后读取 `.understand-anything/cold-start-plan.json` 和 `.understand-anything/cold-start-run.json` 并报告：
 
 - platform
 - shard 数量
 - 按执行顺序排列的 shard id
-- 即将运行的精确 `/understand --scope ... --shard ...` 和 `/understand-product --shard ... --platform ...` 命令
+- 每个 shard 的 scopes 和等价手动命令。等价命令只用于报告，不作为本 skill 的执行步骤。
+- run state 路径和 configHash。
 
 如果配置校验失败，停止并报告错误。配置无效时不要尝试部分执行。
 
-## Phase 2: 生成 Code Shards
+## Phase 2: 状态机驱动执行
 
-按计划顺序，对每个 shard 执行：
+长期运行必须由 helper 的 run state 驱动。不要靠上下文记忆判断“下一个 shard”。
 
-```text
-/understand --scope <scopeArg> --shard <id>
+循环运行：
+
+```bash
+python3 "$PLUGIN_ROOT/skills/understand-cold-start/cold-start-workflow.py" next "$PROJECT_ROOT" "$CONFIG_PATH" "$PROJECT_ROOT/.understand-anything/cold-start-run.json" "$PROJECT_ROOT/.understand-anything/cold-start-next.json" [--resume] [--continue-on-error]
 ```
 
-执行规则：
+读取 `.understand-anything/cold-start-next.json`：
 
-- 一次只运行一个 shard，不要并行。用户明确需要有序冷启动。
-- 如果传入 `--resume`，并且 `.understand-anything/shards/<id>.json` 存在且 `shard.id`、`shard.scopes` 与配置匹配，跳过该 code shard，并在报告中说明是 resumed。
-- 如果某个 shard 失败，立即停止，除非传入了 `--continue-on-error`。
-- 在最终摘要中记录失败项。
+- `action: "run-code-shard"`：执行 Phase 3。
+- `action: "run-product-shard"`：执行 Phase 4。
+- `action: "blocked"`：停止，报告 `stage`、`shardId`、`phase`、`error`、`attempts`。
+- `action: "complete"`：进入 Phase 5 校验。
 
-## Phase 3: 生成 Product Shards
+每次执行 action 前，先调用：
 
-按同一个计划顺序，对每个 shard 执行：
-
-```text
-/understand-product --shard <id> --platform <platform>
+```bash
+python3 "$PLUGIN_ROOT/skills/understand-cold-start/cold-start-workflow.py" mark-start "$PROJECT_ROOT" "$CONFIG_PATH" "$PROJECT_ROOT/.understand-anything/cold-start-run.json" <code|product> <shardId> <phase>
 ```
 
+执行成功后调用：
+
+```bash
+python3 "$PLUGIN_ROOT/skills/understand-cold-start/cold-start-workflow.py" mark-success "$PROJECT_ROOT" "$CONFIG_PATH" "$PROJECT_ROOT/.understand-anything/cold-start-run.json" <code|product> <shardId>
+```
+
+执行失败后调用：
+
+```bash
+python3 "$PLUGIN_ROOT/skills/understand-cold-start/cold-start-workflow.py" mark-failed "$PROJECT_ROOT" "$CONFIG_PATH" "$PROJECT_ROOT/.understand-anything/cold-start-run.json" <code|product> <shardId> <phase> "<error>"
+```
+
+失败两次后 helper 会返回 `blocked`。传入 `--continue-on-error` 时，helper 会记录失败并继续下一个可执行 shard。`--resume` 只跳过通过 helper 严格校验的 code/product artifacts。
+
+## Phase 3: 生成 Code Shards
+
 执行规则：
+- 当 next action 是 `run-code-shard`，**在主上下文内联执行 Code Shard Workflow：读取并执行 `skills/understand/code-shard-workflow.md`**。不要派发 subagent 执行整个 workflow。
+- 对当前 shard 设置 `PROJECT_ROOT`、`PLUGIN_ROOT`、`SKILL_DIR=$PLUGIN_ROOT/skills/understand`、`SHARD_ID`、`SCOPE_PATHS`、`SCOPE_PATHS_JSON`、`SCOPE_ROOTS`、`OUTPUT_LANGUAGE`、`LANGUAGE_DIRECTIVE`、`README_CONTENT`、`MANIFEST_CONTENT`。
+- `SCOPE_PATHS_JSON` 必须由当前 shard 的 `SCOPE_PATHS` JSON-encode 得到，且必须是非空 JSON array；如果为空或缺失，停止该 shard，不要执行全项目扫描。
+- **使用 `skills/understand/code-shard-workflow.md` 作为唯一 code shard 生成流程来源**，主上下文内联执行其中的 scan、batch analyze、merge、assemble review、validate、save 和 manifest refresh 阶段。
+- **一次只运行一个 shard，不要并行**。
 
-- 一次只运行一个 product shard。
-- 如果传入 `--resume`，并且 `.understand-anything/product-shards/<id>.json` 和 `.understand-anything/product-traces/<id>.json` 都存在，跳过该 product shard，并在报告中说明是 resumed。
-- 不要执行 `/understand-domain`。
-- 如果某个 product shard 失败，立即停止，除非传入了 `--continue-on-error`。
+## Phase 4: 生成 Product Shards
 
-## Phase 4: 校验产物
+- 当 next action 是 `run-product-shard`，**在主上下文内联执行 Product Shard Workflow：读取并执行 `skills/understand-product/product-shard-workflow.md`**。不要派发 subagent 执行整个 workflow，也不要把整个 product shard 生成委托给 `/understand-product`。
+- 对当前 shard 设置 `PROJECT_ROOT`、`PLUGIN_ROOT`、`SHARD_ID`、`PRODUCT_ARGUMENTS="--shard <id> --platform <platform>"`。
+- **使用 `skills/understand-product/product-shard-workflow.md` 作为唯一 product shard 生成流程来源**，主上下文内联执行其中的 prepare candidates、topic normalization、context packs、fact extraction、finalize 和 manifest refresh 阶段。
+- **一次只运行一个 product shard，不要并行**。
+
+## Phase 5: 校验产物
 
 运行：
 
 ```bash
-python "$PLUGIN_ROOT/skills/understand-cold-start/cold-start-workflow.py" verify "$PROJECT_ROOT" "$CONFIG_PATH" "$PROJECT_ROOT/.understand-anything/cold-start-report.json"
+python3 "$PLUGIN_ROOT/skills/understand-cold-start/cold-start-workflow.py" verify "$PROJECT_ROOT" "$CONFIG_PATH" "$PROJECT_ROOT/.understand-anything/cold-start-report.json"
 ```
 
 读取 `.understand-anything/cold-start-report.json`。
@@ -120,6 +145,7 @@ python "$PLUGIN_ROOT/skills/understand-cold-start/cold-start-workflow.py" verify
 使用中文回复，并包含：
 
 - 使用的配置路径。
-- 已完成、因 resume 跳过、失败的 shards。
+- `.understand-anything/cold-start-run.json` 路径。
+- 已完成、因 resume 跳过、失败、blocked 的 shards。
 - code shard manifest 和 product shard manifest 是否通过校验。
 - `.understand-anything/cold-start-report.json` 路径。

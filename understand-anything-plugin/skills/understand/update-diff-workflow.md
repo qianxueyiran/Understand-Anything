@@ -9,6 +9,7 @@ Keep `SKILL.md` responsible for option parsing and agent dispatch. Keep `sharded
 - `PROJECT_ROOT` — absolute project root.
 - `PLUGIN_ROOT` — absolute Understand Anything plugin root.
 - `SKILL_DIR` — `$PLUGIN_ROOT/skills/understand`.
+- `LANGUAGE_DIRECTIVE` — language directive from SKILL.md Pre-flight step 4; inject into every `file-analyzer` dispatch.
 - Existing `$PROJECT_ROOT/.understand-anything/knowledge-graph.json` with `kind: "codebase-sharded"`.
 - Existing shard artifacts referenced by the manifest.
 - Existing shard fingerprints when available under `.understand-anything/fingerprints/shards/`.
@@ -30,9 +31,8 @@ When the root graph is `kind: "codebase-sharded"`, `/understand --update-diff` i
 Core invariants:
 
 - Artifacts written after `plan` must carry the active `runId`, `headCommitHash`, and `shardId`.
-- Published shard candidates must not include `layers` or `tour` keys.
 - `sharded-update-workflow.mjs` rejects stale, missing, failed, cross-run, and cross-shard artifacts.
-- `merge-batch-graphs.py --import-recovery-only` recovers `imports` edges from `scan-result.json` `importMap`; cross-shard targets are preserved as `external: true` imports.
+- `merge-batch-graphs.py --import-recovery-only` recovers `imports` edges from `$PROJECT_ROOT/.understand-anything/intermediate/scan-result.json` `importMap` during `assemble-shard`; Phase 2 Step 1 builds that file by merging per-shard import maps. Cross-shard targets are preserved as `external: true` imports.
 - `commit` is the only command allowed to advance `knowledge-graph.json.update.gitCommitHash`.
 - `commit` must not partially publish valid shards when another affected shard is rejected.
 
@@ -79,23 +79,139 @@ For every shard entry, keep:
 
 ## Phase 2 — ANALYZE AFFECTED SHARDS
 
-For each shard where `status === "needs-file-analysis"`, dispatch one `file-analyzer` subagent. Run up to 5 concurrently.
+Before Phase 2, ensure working directories exist:
+
+```bash
+mkdir -p "$PROJECT_ROOT/.understand-anything/intermediate/sharded"
+mkdir -p "$PROJECT_ROOT/.understand-anything/tmp"
+```
 
 Skip analyzer dispatch for `deleted-only`, `noop`, and `blocked` shards.
 
-**`file-analyzer` dispatch (sharded update-diff only)** — each dispatch must analyze only that shard's `structuralFiles`, write to the shard's `requiredOutputs.fileAnalyzerBatches[0]` path, and include matching `runId`, `headCommitHash`, `shardId`, and `status: "success"`.
+For each shard where `status === "needs-file-analysis"`, treat that shard's `structuralFiles` as **one batch** (`batch-001`). Run up to **6 shards concurrently**.
+
+Initialize `$PROJECT_ROOT/.understand-anything/intermediate/scan-result.json` once per run as `{ "importMap": {} }` before the first affected shard scan. Merge each shard's import map into it during Step 1.
+
+### Step 1 — Prepare batch inputs per affected shard
+
+说明：`batchFiles` 只能来自 `structuralFiles` 对应的扫描元数据，禁止扩展文件范围。
+
+For each affected shard:
+
+1. Run deterministic scan scoped to the shard's `scopes`:
+
+```bash
+node "$SKILL_DIR/scan-project.mjs" "$PROJECT_ROOT" "$PROJECT_ROOT/.understand-anything/intermediate/update-diff-scan-<shardId>.json" --scope-json "<scopes JSON>" --require-scope --repository-output "$PROJECT_ROOT/.understand-anything/intermediate/update-diff-repository-<shardId>.json"
+node "$SKILL_DIR/extract-import-map.mjs" "$PROJECT_ROOT/.understand-anything/intermediate/update-diff-scan-<shardId>.json" "$PROJECT_ROOT/.understand-anything/intermediate/update-diff-import-map-<shardId>.json" --repository-input "$PROJECT_ROOT/.understand-anything/intermediate/update-diff-repository-<shardId>.json"
+```
+
+If either deterministic script fails, retry the failed command once with the same arguments after reading stderr. If the retry also fails, stop and report shard id + error.
+
+2. Build `structuralFileSet = new Set(structuralFiles)` and `batchFiles` by filtering scan `files` to paths in `structuralFileSet`.
+3. Build `batchImportData` from `update-diff-import-map-<shardId>.json` → `importMap[path] ?? []` for every path in `batchFiles`.
+4. Merge this shard's `importMap` into `$PROJECT_ROOT/.understand-anything/intermediate/scan-result.json` for all paths in `batchFiles` (used by `assemble-shard` import recovery).
+5. Validate before dispatch:
+   - `batchFiles` is the only source of analyzer input; do not read `repository-files.json`, rescan the repo ad hoc, or reuse stale tmp `ua-file-analyzer-input-*.json`;
+   - `new Set(batchFiles.map(f => f.path))` must equal `structuralFileSet` — every structural file must have scan metadata; stop if any path is missing;
+   - every batch file must have `fileCategory` in `code|config|docs|infra|data|script|markup`;
+   - reject `image`, `resource`, `binary`, or any file category/language outside the scanner contract;
+   - `batchImportData` keys must exactly equal the batch file paths.
+
+If validation fails, stop and report the shard id plus invalid paths/categories. Do not dispatch `file-analyzer`.
+
+### Step 2 — Pre-extract structure in main context
+
+说明：主流程先完成结构抽取，子 agent 只做语义分析；tmp 路径用 `<shardId>` 以避免并发冲突。
+
+For each affected shard:
+
+1. Write extract input JSON (verbatim fields) to:
+   - `$PROJECT_ROOT/.understand-anything/tmp/ua-file-analyzer-input-<shardId>.json`
+
+   Required shape:
+
+   ```json
+   {
+     "projectRoot": "$PROJECT_ROOT",
+     "batchFiles": [<path, language, sizeLines, fileCategory each>],
+     "batchImportData": { "<path>": ["<resolved-import>", ...], ... }
+   }
+   ```
+
+2. Run:
+
+```bash
+node "$SKILL_DIR/extract-structure.mjs" \
+  "$PROJECT_ROOT/.understand-anything/tmp/ua-file-analyzer-input-<shardId>.json" \
+  "$PROJECT_ROOT/.understand-anything/tmp/ua-file-extract-results-<shardId>.json"
+```
+
+3. Validate extraction output:
+   - `scriptCompleted === true`;
+   - `results` is an array;
+   - every `results[].path` is in `structuralFileSet`.
+4. If extraction fails, retry once with the same arguments after reading stderr. If retry fails, stop and report shard id + error.
+
+### Step 3 — Dispatch `file-analyzer` subagents
+
+说明：派发语义分析合同；输出为 sharded update-diff envelope。
+
+**After extraction files are ready, dispatch one `file-analyzer` subagent per affected shard using `$PLUGIN_ROOT/agents/file-analyzer.md`**.
+
+Before each dispatch:
+
+```bash
+mkdir -p "$PROJECT_ROOT/.understand-anything/intermediate/sharded/<shardId>"
+```
+
+**`file-analyzer` dispatch (sharded update-diff only)** — each dispatch must analyze only that shard's `batchFiles`, write to the shard's `requiredOutputs.fileAnalyzerBatches[0]` path, and include matching `runId`, `headCommitHash`, `shardId`, and `status: "success"`.
+
+Additional context:
+
+```markdown
+> **Additional context from main session:**
+>
+> $LANGUAGE_DIRECTIVE
+```
 
 The dispatch prompt must include:
 
-> **Mode:** sharded `--update-diff` batch for shard `<shardId>`.
-> MUST READ AND FOLLOW `agents/file-analyzer.md` — use the **Sharded `--update-diff`** writing section.
-> Project root: `$PROJECT_ROOT`
-> Run identity (copy verbatim into the output JSON): `runId` = `<runId>`, `headCommitHash` = `<headCommitHash>`, `shardId` = `<shardId>`
-> Analyze **only** these structural files: `<structuralFiles JSON array from the shard entry>`
-> Write output to: `$PROJECT_ROOT/.understand-anything/<requiredOutputs.fileAnalyzerBatches[0]>` (usually `intermediate/sharded/<shardId>/batch-001.json`)
-> Include `status: "success"` on success, or `status: "failed"` with `warning` on failure.
-> Construct `batchImportData` only for the structural files above (same rules as full build).
-> Do not write to `intermediate/batch-<n>.json`.
+```text
+Mode: sharded --update-diff for shard <shardId>.**MUST READ AND FOLLOW `$PLUGIN_ROOT/agents/file-analyzer.md` BEFORE WORK** — use the Sharded `--update-diff` writing section.
+Project root: $PROJECT_ROOT
+runId: <runId from sharded-update-run.json>
+headCommitHash: <headCommitHash from sharded-update-run.json>
+shardId: <shardId>
+Write output to: $PROJECT_ROOT/.understand-anything/<requiredOutputs.fileAnalyzerBatches[0]> (usually `intermediate/sharded/<shardId>/batch-001.json`)
+Pre-extracted structure path: $PROJECT_ROOT/.understand-anything/tmp/ua-file-extract-results-<shardId>.json
+Pre-resolved import data: <batchImportData JSON>
+Files to analyze: <batchFiles — path, language, sizeLines, fileCategory each>
+
+Field constraints:
+- Process: read and use `Pre-extracted structure path` only. Do not run or create scripts.
+- Granularity: one node per batch file. `code`/`script`/`markup` → `file:<path>` only — never `function:`/`class:` IDs or type function/class. Non-code: parent node per file (`config`, `document`, `service`, `pipeline`, `schema`, `table`, `endpoint`, `resource`); optional children from non-empty services/endpoints/steps/resources only.
+- Node required:
+   - `id`: type-prefixed, e.g. file:src/a.ts — no project prefix, no bare paths
+   - `type`: file|config|document|service|table|endpoint|pipeline|schema|resource
+   - `name`
+   - `summary`: non-empty, follow language directive
+   - `tags`: 3–5, non-empty; follow language directive
+   - `complexity`: simple|moderate|complex
+   - `filePath`: = batchFiles[].path
+   - `businessSignals`: 0–5, follow language directive, [{type: entry|behavior|rule|display|data|integration, text: 关键业务逻辑，使用产品语言描述}]
+- Edge required: `source`, `target`, `type`, `direction` "forward", `weight` (number).
+- Code edges only: imports 0.7, depends_on 0.6, tested_by 0.5 — no contains/calls/exports/inherits. For path P, imports edge count MUST equal batchImportData[P].length (one edge per entry; keys use batchFiles[].path).
+- Non-code edges when justified: configures 0.6, documents 0.5, deploys 0.7, migrates 0.7, triggers 0.6, defines_schema 0.8, serves 0.7, provisions 0.7, routes 0.6, related 0.5, depends_on 0.6.
+- Self-check before writing:
+  - imports edge count equals `sum(batchImportData[path].length)` across code files;
+  - no `function`/`class` nodes and no `function:`/`class:` ids;
+  - every non-external edge target/source exists in produced nodes.
+- Envelope required: {runId, headCommitHash, shardId, status:"success", nodes, edges} — or status:"failed" + warning.
+- Do not write to intermediate/batch-<n>.json in this mode.
+- Output: valid JSON to path above; one node per file; no duplicate ids; no self-edges; reply with counts only (no full JSON in chat).
+```
+
+**Do not skip `file-analyzer`; do not simulate it with scripts.**
 
 Read the batch output before assembling. If it is missing, has `status !== "success"`, or does not copy the expected `runId`, `headCommitHash`, and `shardId`, retry that subagent once with the mismatch included as failure context. If the retry fails, write no replacement artifact and continue to Phase 3 so `assemble-shard` can record the failed assemble result for that shard.
 
@@ -114,6 +230,8 @@ For `needs-file-analysis`, the assemble step requires the current-run analyzer b
 If the assemble result has `status: "failed"`, keep the warning and continue checking the remaining affected shards. The later `commit` phase must reject the transaction and must not partially publish other affected shards.
 
 If the assemble result has `status: "success"`, verify that `candidatePath` matches `requiredOutputs.candidateShard` and that the candidate exists. Do not edit the candidate manually.
+
+Candidate shard JSON must not include `layers` or `tour` keys.
 
 ## Phase 4 — COMMIT
 

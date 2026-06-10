@@ -42,22 +42,27 @@ The planner maps changed files to affected shard ids, computes file-level decisi
 
 ## Phase 2 — Re-Analyze Affected Files
 
+Follow `skills/understand/update-diff-workflow.md` Phase 2 end-to-end. Each affected shard uses one batch (`batch-001`), tmp paths keyed by `<shardId>`, and sharded envelope output.
+
 Process each shard plan entry from the run record:
 
 - `noop`: skip the shard.
 - `deleted-only`: run the assemble step for the shard so removed file nodes and dangling edges are pruned.
-- `needs-file-analysis`: dispatch `file-analyzer` for the listed files, then run the assemble step for that shard.
+- `needs-file-analysis`:
+  1. Build `batchFiles` / `batchImportData` from deterministic scan scoped to shard `scopes`, filtered to `structuralFiles`.
+  2. Run `extract-structure.mjs` in the main context for that shard.
+  3. Dispatch `file-analyzer` with `Pre-extracted structure path` and the sharded update-diff envelope contract.
+  4. Run the assemble step for that shard.
 
 When dispatching `file-analyzer`, include:
 
 - Project root: `$PROJECT_ROOT`
-- Shard id
-- Shard scope paths
-- Existing shard graph path
-- Files to analyze
-- Output path under `.understand-anything/intermediate/`
+- Run identity: `runId`, `headCommitHash`, `shardId`
+- Pre-extracted structure path: `.understand-anything/tmp/ua-file-extract-results-<shardId>.json`
+- Pre-resolved import data and batch file list
+- Output path: shard `requiredOutputs.fileAnalyzerBatches[0]`
 
-Analyze only the files listed by the shard plan. Use the existing shard graph and manifest context for import resolution and relationship continuity.
+Analyze only the files listed in `structuralFiles`. Do not run `extract-structure.mjs` inside the subagent.
 
 ---
 

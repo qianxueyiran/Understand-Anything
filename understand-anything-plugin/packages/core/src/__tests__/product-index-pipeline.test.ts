@@ -134,11 +134,9 @@ describe("product index strict pipeline", () => {
         name: "开机启动处理",
         summary: "系统开机广播触发应用初始化和首页数据准备。",
         kind: "capability",
-        sourceCandidateIds: [candidate.id],
         rootNodeIds: [candidate.rootNodeId],
         domainRefs: [],
       },
-      roots: [candidate.rootNodeId],
       candidateFiles: [
         {
           fileId: "file:app/BootBroadcastReceiver.java",
@@ -157,7 +155,6 @@ describe("product index strict pipeline", () => {
           ],
         },
       ],
-      overflowFiles: [],
     };
 
     const result = validateProductExtractions(
@@ -205,11 +202,9 @@ describe("product index strict pipeline", () => {
         name: "开机启动处理",
         summary: "系统开机广播触发应用初始化和首页数据准备。",
         kind: "capability",
-        sourceCandidateIds: [candidate.id],
         rootNodeIds: [candidate.rootNodeId],
         domainRefs: [],
       },
-      roots: [candidate.rootNodeId],
       candidateFiles: [
         {
           fileId: "file:app/BootBroadcastReceiver.java",
@@ -228,7 +223,6 @@ describe("product index strict pipeline", () => {
           ],
         },
       ],
-      overflowFiles: [],
     };
 
     const result = validateProductExtractions(

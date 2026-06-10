@@ -405,12 +405,17 @@ export function buildProductIndexTrace(input: {
         reason: file.reason,
       })),
     ),
-    overflowFiles: input.contextPacks.flatMap((pack) =>
-      pack.overflowFiles.map((filePath) => ({
+    overflowFiles: input.contextPacks.flatMap((pack) => {
+      const legacyOverflow = (pack as TopicContextPack & { overflowFiles?: string[] }).overflowFiles;
+      if (!legacyOverflow?.length) {
+        return [];
+      }
+
+      return legacyOverflow.map((filePath) => ({
         topicId: pack.topic.id,
         filePath,
-      })),
-    ),
+      }));
+    }),
     warnings: input.warnings,
   };
 }
