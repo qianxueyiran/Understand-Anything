@@ -157,8 +157,6 @@ The preprocessing script does NOT produce a domain graph — it produces **raw m
 5. In shard mode, run `python "$PLUGIN_ROOT/skills/understand-domain/domain-shard-workflow.py" "$PROJECT_ROOT" --shard "$SHARD_ID" --finalize`. The script reads `$DOMAIN_SHARD_PATHS.intermediatePath`, writes `$DOMAIN_SHARD_PATHS.domainShardPath`, and refreshes `$DOMAIN_SHARD_PATHS.manifestPath`.
 6. Clean up `$PROJECT_ROOT/.understand-anything/intermediate/domain-analysis.json` and `$PROJECT_ROOT/.understand-anything/intermediate/domain-context.json`; in shard mode, clean up `$PROJECT_ROOT/.understand-anything/intermediate/domain-shards/$SHARD_ID/domain-analysis.json`
 
-### Phase 6: Launch Dashboard
+### Phase 6: Completion
 
-1. Auto-trigger `/understand-dashboard` to visualize the domain graph
-2. The dashboard will detect `domain-graph.json` and show the domain view by default
-3. In shard mode, do not automatically launch the dashboard
+Report the domain graph saved path and a summary of domains, flows, and steps extracted.

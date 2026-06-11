@@ -8,8 +8,7 @@
     "prepare": "pnpm --filter @understand-anything/core build",
     "build": "pnpm -r build",
     "test": "vitest",
-    "dev:dashboard": "pnpm --filter @understand-anything/dashboard dev",
-    "lint": "eslint ."
+"lint": "eslint ."
   },
   "devDependencies": {
     "typescript": "^5.7.0",

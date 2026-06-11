@@ -1,313 +1,264 @@
-<h1 align="center">Understand Anything</h1>
+# Understand Anything
 
-<p align="center">
-  <strong>Turn any codebase, knowledge base, or docs into an interactive knowledge graph you can explore, search, and ask questions about.</strong>
-  <br />
-  <em>Works with Claude Code, Codex, Cursor, Copilot, Gemini CLI, and more.</em>
-</p>
-
-<p align="center">
-  <a href="README.md">English</a> | <a href="READMEs/README.zh-CN.md">简体中文</a> | <a href="READMEs/README.zh-TW.md">繁體中文</a> | <a href="READMEs/README.ja-JP.md">日本語</a> | <a href="READMEs/README.ko-KR.md">한국어</a> | <a href="READMEs/README.es-ES.md">Español</a> | <a href="READMEs/README.tr-TR.md">Türkçe</a>
-</p>
-
-<p align="center">
-  <a href="#-quick-start"><img src="https://img.shields.io/badge/Quick_Start-blue" alt="Quick Start" /></a>
-  <a href="https://github.com/Lum1104/Understand-Anything/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow" alt="License: MIT" /></a>
-  <a href="https://docs.anthropic.com/en/docs/claude-code"><img src="https://img.shields.io/badge/Claude_Code-8A2BE2" alt="Claude Code" /></a>
-  <a href="#codex"><img src="https://img.shields.io/badge/Codex-000000" alt="Codex" /></a>
-  <a href="#vs-code--github-copilot"><img src="https://img.shields.io/badge/Copilot-24292e" alt="Copilot" /></a>
-  <a href="#copilot-cli"><img src="https://img.shields.io/badge/Copilot_CLI-24292e" alt="Copilot CLI" /></a>
-  <a href="#gemini-cli"><img src="https://img.shields.io/badge/Gemini_CLI-4285F4" alt="Gemini CLI" /></a>
-  <a href="#opencode"><img src="https://img.shields.io/badge/OpenCode-38bdf8" alt="OpenCode" /></a>
-  <a href="#mistral-vibe-cli"><img src="https://img.shields.io/badge/Vibe_CLI-7c3aed" alt="Vibe CLI" /></a>
-  <a href="https://understand-anything.com"><img src="https://img.shields.io/badge/Homepage-d4a574" alt="Homepage" /></a>
-  <a href="https://understand-anything.com/demo/"><img src="https://img.shields.io/badge/Live_Demo-00c853" alt="Live Demo" /></a>
-</p>
-
-<p align="center">
-  <img src="assets/hero.png" alt="Understand Anything — Turn any codebase into an interactive knowledge graph" width="800" />
-</p>
-
-<p align="center">
-  <strong>💬 <a href="https://discord.gg/pydat66RY">Join the Discord community &rarr;</a></strong>
-  <br />
-  <em>Ask questions, share what you've built, get help from the community.</em>
-</p>
+本工程基于开源项目 [Lum1104/Understand-Anything](https://github.com/Lum1104/Understand-Anything) 进行二次开发，面向大型 Android 项目场景，扩展了分片模式下的代码图谱生成、产品知识索引、冷启动编排和增量更新能力。
 
 ---
 
-**You just joined a new team. The codebase is 200,000 lines of code. Where do you even start?**
+## 1. 项目说明
 
-Understand Anything is a [Claude Code Plugin](https://code.claude.com/docs/en/plugins-reference#plugins-reference) that analyzes your project with a multi-agent pipeline, builds a knowledge graph of every file, function, class, and dependency, then gives you an interactive dashboard to explore it all visually. Stop reading code blind. Start seeing the big picture.
+原开源项目通过多智能体流水线分析代码库，构建交互式知识图谱，支持可视化探索、语义搜索和架构理解。
 
-> **The goal isn't a graph that wows you with how complex your codebase is — it's a graph that quietly teaches you how every piece fits together.**
+本工程在此基础上重点扩展了：
 
----
-
-## ✨ Features
-
-> [!NOTE]
-> **Want to skip the reading?** Try the [live demo](https://understand-anything.com/demo/) in our [homepage](https://understand-anything.com/) — a fully interactive dashboard you can pan, zoom, search, and explore right in your browser.
-
-### Explore the structural graph
-
-Navigate your codebase as an interactive knowledge graph — every file, function, and class is a node you can click, search, and explore. Select any node to see plain-English summaries, relationships, and guided tours.
-
-### Understand business logic
-
-Switch to the domain view and see how your code maps to real business processes — domains, flows, and steps laid out as a horizontal graph.
-
-### Analyze knowledge bases
-
-Point `/understand-knowledge` at a [Karpathy-pattern LLM wiki](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f) and get a force-directed knowledge graph with community clustering. The deterministic parser extracts wikilinks and categories from `index.md`, then LLM agents discover implicit relationships, extract entities, and surface claims — turning your wiki into a navigable graph of interconnected ideas.
-
-<table>
-  <tr>
-    <td width="50%" valign="top">
-      <h3>🧭 Guided Tours</h3>
-      <p>Auto-generated walkthroughs of the architecture, ordered by dependency. Learn the codebase in the right order.</p>
-    </td>
-    <td width="50%" valign="top">
-      <h3>🔍 Fuzzy & Semantic Search</h3>
-      <p>Find anything by name or by meaning. Search "which parts handle auth?" and get relevant results across the graph.</p>
-    </td>
-  </tr>
-  <tr>
-    <td width="50%" valign="top">
-      <h3>📊 Diff Impact Analysis</h3>
-      <p>See which parts of the system your changes affect before you commit. Understand ripple effects across the codebase.</p>
-    </td>
-    <td width="50%" valign="top">
-      <h3>🎭 Persona-Adaptive UI</h3>
-      <p>The dashboard adjusts its detail level based on who you are — junior dev, PM, or power user.</p>
-    </td>
-  </tr>
-  <tr>
-    <td width="50%" valign="top">
-      <h3>🏗️ Layer Visualization</h3>
-      <p>Automatic grouping by architectural layer — API, Service, Data, UI, Utility — with color-coded legend.</p>
-    </td>
-    <td width="50%" valign="top">
-      <h3>📚 Language Concepts</h3>
-      <p>12 programming patterns (generics, closures, decorators, etc.) explained in context wherever they appear.</p>
-    </td>
-  </tr>
-</table>
+- **分片（Shard）模式**：将大型 Android 项目按模块切分为多个 shard，独立分析后合并为统一的 sharded manifest，突破单次上下文限制
+- **Product Index 生成**：基于 code shard 提取严格 grounded 的产品事实，用于回答"某功能如何实现"类客户端产品问题
+- **冷启动编排**：通过配置文件一次性完成所有 code shard + product shard 的首次生成，支持断点续跑
+- **增量更新**：仅重新分析自上次运行以来变更的文件，快速同步代码图谱
 
 ---
 
-## 🚀 Quick Start
+## 2. 快速开始
 
-### 1. Install the plugin
+### 前提条件
 
-```bash
-/plugin marketplace add Lum1104/Understand-Anything
-/plugin install understand-anything
-```
+- Node.js >= 22
+- pnpm >= 10
+- Claude Code CLI
 
-### 2. Analyze your codebase
+### 首次安装
 
-```bash
-/understand
-```
-
-A multi-agent pipeline scans your project, extracts every file, function, class, and dependency, then builds a knowledge graph saved to `.understand-anything/knowledge-graph.json`.
-
-**Localized output:** Use `--language` to generate content in your preferred language:
+**第一步：构建依赖包**
 
 ```bash
-# Generate Chinese content (知识图节点描述和 Dashboard UI)
-/understand --language zh
-
-# Supported languages: en (default), zh, zh-TW, ja, ko
+pnpm install
+pnpm --filter @understand-anything/core build
+pnpm --filter @understand-anything/skill build
 ```
 
-The `--language` parameter affects:
-- Node summaries and descriptions in the knowledge graph
-- Dashboard UI labels, buttons, and tooltips
-- Guided tour explanations
-
-### 3. Explore the dashboard
+**第二步：将插件复制到 Claude Code 本地缓存**
 
 ```bash
-/understand-dashboard
+mkdir -p ~/.claude/plugins/cache/understand-anything/understand-anything/2.7.6
+cp -R ./understand-anything-plugin/. \
+  ~/.claude/plugins/cache/understand-anything/understand-anything/2.7.6/
 ```
 
-An interactive web dashboard opens with your codebase visualized as a graph — color-coded by architectural layer, searchable, and clickable. Select any node to see its code, relationships, and a plain-English explanation.
+**第三步：将插件注册为本地版本**
 
-### 4. Keep learning
+编辑 `~/.claude/plugins/installed_plugins.json`，将 `understand-anything@understand-anything` 条目的 `installPath` 和 `version` 改为：
 
-```bash
-# Ask anything about the codebase
-/understand-chat How does the payment flow work?
-
-# Analyze impact of your current changes
-/understand-diff
-
-# Deep-dive into a specific file or function
-/understand-explain src/auth/login.ts
-
-# Generate an onboarding guide for new team members
-/understand-onboard
-
-# Extract business domain knowledge (domains, flows, steps)
-/understand-domain
-
-# Generate a product knowledge index for client product questions
-/understand-product --platform android
-
-# Analyze a Karpathy-pattern LLM wiki knowledge base
-/understand-knowledge ~/path/to/wiki
+```json
+{
+  "installPath": "/Users/<你的用户名>/.claude/plugins/cache/understand-anything/understand-anything/2.7.6",
+  "version": "2.7.6"
+}
 ```
 
-`/understand-product` builds `.understand-anything/product-index.json` from an existing knowledge graph. It uses business signals generated during `/understand`, constructs bounded Topic Context Packs, then extracts product facts with minimal code evidence.
+> 这一步让 Claude Code 命中本地缓存，不再从 marketplace 拉取上游版本。
+
+**第四步：启动一个新的 Claude Code session**
+
+已有 session 会缓存旧的 skill 内容，必须新开 session 才能加载改动。
 
 ---
 
-## 🌐 Multi-Platform Installation
+### 后续改动时同步
 
-Understand-Anything works across multiple AI coding platforms.
-
-### Claude Code (Native)
+每次修改 skill / agent / src 代码后执行：
 
 ```bash
-/plugin marketplace add Lum1104/Understand-Anything
-/plugin install understand-anything
+pnpm --filter @understand-anything/core build && \
+pnpm --filter @understand-anything/skill build && \
+cp -R ./understand-anything-plugin/. \
+  ~/.claude/plugins/cache/understand-anything/understand-anything/2.7.6/
 ```
 
-### One-line install (Codex / OpenCode / OpenClaw / Antigravity / Gemini CLI / Pi Agent / Vibe CLI / VS Code Copilot / Hermes / Cline / KIMI CLI)
-
-**macOS / Linux:**
-```bash
-curl -fsSL https://raw.githubusercontent.com/Lum1104/Understand-Anything/main/install.sh | bash
-# or skip the prompt by passing the platform:
-curl -fsSL https://raw.githubusercontent.com/Lum1104/Understand-Anything/main/install.sh | bash -s codex
-```
-
-**Windows (PowerShell):**
-```powershell
-iwr -useb https://raw.githubusercontent.com/Lum1104/Understand-Anything/main/install.ps1 | iex
-```
-
-The installer clones the repo to `~/.understand-anything/repo` and creates the right symlinks for the chosen platform. Restart your CLI/IDE afterwards.
-
-- Supported `<platform>` values: `gemini`, `codex`, `opencode`, `pi`, `openclaw`, `antigravity`, `vibe`, `vscode`, `hermes`, `cline`, `kimi`
-- Update later: `./install.sh --update`
-- Uninstall: `./install.sh --uninstall <platform>`
-
-### Cursor
-
-Cursor auto-discovers the plugin via `.cursor-plugin/plugin.json` when this repo is cloned. No manual installation needed — just clone and open in Cursor.
-
-### VS Code + GitHub Copilot
-
-VS Code with GitHub Copilot (v1.108+) auto-discovers the plugin via `.copilot-plugin/plugin.json` when this repo is cloned. No manual installation needed — just clone and open in VS Code.
-
-For personal skills (available across all projects), run the `install.sh` above with the `vscode` platform.
-
-### Copilot CLI
-
-```bash
-copilot plugin install Lum1104/Understand-Anything:understand-anything-plugin
-```
-
-### Platform Compatibility
-
-| Platform | Status | Install Method |
-|----------|--------|----------------|
-| Claude Code | ✅ Native | Plugin marketplace |
-| Cursor | ✅ Supported | Auto-discovery |
-| VS Code + GitHub Copilot | ✅ Supported | Auto-discovery |
-| Copilot CLI | ✅ Supported | Plugin install |
-| Codex | ✅ Supported | `install.sh codex` |
-| OpenCode | ✅ Supported | `install.sh opencode` |
-| OpenClaw | ✅ Supported | `install.sh openclaw` |
-| Antigravity | ✅ Supported | `install.sh antigravity` |
-| Gemini CLI | ✅ Supported | `install.sh gemini` |
-| Pi Agent | ✅ Supported | `install.sh pi` |
-| Vibe CLI | ✅ Supported | `install.sh vibe` |
-| Hermes | ✅ Supported | `install.sh hermes` |
-| Cline | ✅ Supported | `install.sh cline` |
-| KIMI CLI | ✅ Supported | `install.sh kimi` |
+然后重新开一个 Claude Code session。
 
 ---
 
-## 📦 Share the Graph with Your Team
+## 3. `/understand` 介绍及使用说明
 
-The graph is just JSON — **commit it once, and teammates skip the pipeline**. Good for onboarding, PR reviews, and docs-as-code.
+`/understand` 负责分析指定范围的代码，生成或更新 code shard。本工程只支持分片模式。
 
-> **Example:** [GoogleCloudPlatform/microservices-demo (fork)](https://github.com/Lum1104/microservices-demo) — Go / Java / Python / Node reference with a committed graph.
-
-**What to commit:** everything in `.understand-anything/` *except* `intermediate/` and `diff-overlay.json` (those are local scratch).
-
-```gitignore
-.understand-anything/intermediate/
-.understand-anything/diff-overlay.json
-```
-
-**Keep it fresh:** enable `/understand --auto-update` — a post-commit hook incrementally patches the graph so each commit lands with a matching graph. Or re-run `/understand` manually before releases.
-
-**Large graphs (10 MB+):** track with **git-lfs**.
+### 支持的命令形式
 
 ```bash
-git lfs install
-git lfs track ".understand-anything/*.json"
-git add .gitattributes .understand-anything/
+# 生成（或重建）一个 code shard
+/understand --scope <目录1,目录2,...> --shard <shard-id>
+
+# 强制重建（等价于上面，--full 只是明确表示强制重建）
+/understand --scope <目录1,目录2,...> --shard <shard-id> --full
+
+# 增量更新（详见第 6 节）
+/understand --update-diff
+```
+
+不支持不带 `--shard` 的全项目分析模式。
+
+### 参数说明
+
+| 参数 | 说明 |
+|------|------|
+| `--scope <paths>` | 以逗号分隔的项目相对路径，指定本 shard 覆盖的模块目录 |
+| `--shard <id>` | shard 标识符，须匹配 `^[A-Za-z0-9_-]+$` |
+| `--full` | 强制重建，忽略已有 shard 产物 |
+| `--language <lang>` | 输出语言，默认 `zh`（中文）|
+
+### 生成产物
+
+- `.understand-anything/knowledge-graph.json` — sharded manifest（`kind: "codebase-sharded"`）
+- `.understand-anything/shards/<id>.json` — 该 shard 的代码图正文
+- `.understand-anything/fingerprints/shards/<id>.json` — 用于增量更新的文件指纹
+
+### 示例
+
+```bash
+# 分析 home 模块（包含 a_home 和 a_home_api 两个目录）
+/understand --scope a_home,a_home_api --shard home
+
+# 分析 player 模块
+/understand --scope a_player,a_player_core --shard player
 ```
 
 ---
 
-## 🔧 Under the Hood
+## 4. `/understand-product` 介绍及使用说明
 
-### Multi-Agent Pipeline
+`/understand-product` 基于已有的 code shard，提取以代码为依据的产品事实，生成 product shard，用于回答客户端产品相关问题。
 
-The `/understand` command orchestrates 5 specialized agents, and `/understand-domain` adds a 6th:
+**前提条件：** 对应的 code shard（`.understand-anything/shards/<id>.json`）必须已存在，且根 manifest 的 `kind` 为 `codebase-sharded`。
 
-| Agent | Role |
-|-------|------|
-| `project-scanner` | Discover files, detect languages and frameworks |
-| `file-analyzer` | Extract functions, classes, imports; produce graph nodes and edges |
-| `architecture-analyzer` | Identify architectural layers |
-| `tour-builder` | Generate guided learning tours |
-| `graph-reviewer` | Validate graph completeness and referential integrity (runs inline by default; use `--review` for full LLM review) |
-| `domain-analyzer` | Extract business domains, flows, and process steps (used by `/understand-domain`) |
-| `article-analyzer` | Extract entities, claims, and implicit relationships from wiki articles (used by `/understand-knowledge`) |
+### 支持的命令形式
 
-File analyzers run in parallel (up to 5 concurrent, 20-30 files per batch). Supports incremental updates — only re-analyzes files that changed since the last run.
+```bash
+# 为指定 shard 生成产品知识索引
+/understand-product --shard <id> --platform android
+
+# 仅刷新 product manifest（不重新生成 shard 内容）
+/understand-product --refresh-shards
+```
+
+### 参数说明
+
+| 参数 | 说明 |
+|------|------|
+| `--shard <id>` | 目标 shard 标识符，须与 code shard id 对应 |
+| `--platform <name>` | 平台类型，默认 `android` |
+| `--refresh-shards` | 不重新生成，只重建 product-index.json manifest |
+
+### 生成产物
+
+- `.understand-anything/product-shards/<id>.json` — 该 shard 的产品知识
+- `.understand-anything/product-traces/<id>.json` — 产品事实的代码溯源
+- `.understand-anything/product-index.json` — 汇总 manifest（`kind: "product-sharded"`）
+
+### 业务词汇表
+
+在 `docs/business-glossary.md` 中维护项目业务术语，`/understand-product` 会自动读取，用于 Topic 规范化，提升产品问答的准确性。
+
+### 示例
+
+```bash
+# 为 home shard 生成产品索引
+/understand-product --shard home --platform android
+
+# 为 player shard 生成产品索引
+/understand-product --shard player --platform android
+
+# 所有 shard 都生成完毕后，刷新 manifest
+/understand-product --refresh-shards
+```
 
 ---
 
-## 🤝 Contributing
+## 5. 大型项目冷启动
 
-Contributions are welcome! Here's how to get started:
+冷启动适用于项目首次接入、需要一次性完成所有 shard 生成的场景。`/understand-cold-start` 按配置文件顺序依次执行每个 code shard 和 product shard，支持断点续跑。
 
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/my-feature`)
-3. Run the tests (`pnpm --filter @understand-anything/core test`)
-4. Commit your changes and open a pull request
+### 第一步：编写分片配置
 
-Please open an issue first for major changes so we can discuss the approach.
+在目标项目根目录创建 `.understand-anything/scope-shards.json`：
+
+```json
+{
+  "version": 1,
+  "platform": "android",
+  "shards": [
+    {
+      "id": "home",
+      "scopes": ["a_home", "a_home_api"]
+    },
+    {
+      "id": "player",
+      "scopes": ["a_player", "a_player_core"]
+    },
+    {
+      "id": "common",
+      "scopes": ["a_common", "a_network"]
+    }
+  ]
+}
+```
+
+配置规则：
+- `version` 必须为 `1`
+- `platform` 目前支持 `android`
+- `shards` 按数组顺序执行；`id` 须唯一且符合 `^[A-Za-z0-9_-]+$`
+- `scopes` 为项目根目录下的相对路径列表，不能包含逗号
+
+### 第二步：执行冷启动
+
+```bash
+# 使用默认配置路径（.understand-anything/scope-shards.json）
+/understand-cold-start
+
+# 指定配置文件路径
+/understand-cold-start --config path/to/scope-shards.json
+
+# 从上次中断处继续（跳过已成功完成的 shard）
+/understand-cold-start --resume
+
+# 某个 shard 失败时继续执行其他 shard，而非中止整个流程
+/understand-cold-start --continue-on-error
+```
+
+### 执行流程
+
+1. **校验配置**：解析 `scope-shards.json`，输出执行计划（各 shard 的等价手动命令）
+2. **状态机驱动执行**：依次生成每个 code shard，再依次生成对应的 product shard
+3. **校验产物**：确认所有 shard 文件存在且内容合法，输出校验报告
+
+### 完成后的产物
+
+| 产物路径 | 说明 |
+|---------|------|
+| `.understand-anything/knowledge-graph.json` | sharded manifest，`kind: "codebase-sharded"` |
+| `.understand-anything/shards/<id>.json` | 每个 code shard |
+| `.understand-anything/product-index.json` | product manifest，`kind: "product-sharded"` |
+| `.understand-anything/product-shards/<id>.json` | 每个 product shard |
+| `.understand-anything/product-traces/<id>.json` | 每个 product shard 的代码溯源 |
 
 ---
 
-<p align="center">
-  <strong>Stop reading code blind. Start understanding everything.</strong>
-</p>
+## 6. 更新
 
-## Star History
+代码变更后，使用 `/understand --update-diff` 增量更新代码图谱。
 
-<a href="https://www.star-history.com/?repos=Lum1104%2FUnderstand-Anything&type=date&legend=top-left">
- <picture>
-   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/image?repos=Lum1104/Understand-Anything&type=date&theme=dark&legend=top-left" />
-   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/image?repos=Lum1104/Understand-Anything&type=date&legend=top-left" />
-   <img alt="Star History Chart" src="https://api.star-history.com/image?repos=Lum1104/Understand-Anything&type=date&legend=top-left" />
- </picture>
-</a>
+```bash
+/understand --update-diff
+```
 
-<p align="center">
-  <em>Thanks to everyone who's used and contributed — knowing this saves people time is what made it worth building.</em>
-</p>
+该命令仅重新分析自上次运行以来发生变更的文件，不重建未变动的 shard，速度远快于完整重建。
 
-<p align="center">
-  MIT License &copy; <a href="https://github.com/Lum1104">Lum1104</a>
-</p>
+### 工作机制
+
+- 读取已有的 `kind: "codebase-sharded"` manifest，与当前 git HEAD 比较，确定变更文件
+- 将变更文件映射到对应的 shard，只对受影响的 shard 重新运行 `file-analyzer`
+- 以事务方式提交，确保所有受影响 shard 均成功后才更新 `knowledge-graph.json`；任意 shard 失败则整次更新回滚
+- 无法映射到已有 shard 的变更文件记录为警告，不触发全量重建
+
+### 注意事项
+
+- 运行前须确保工作区处于干净的 git 状态（或已提交目标变更），命令依赖 git diff 计算变更范围
+- 该命令只更新 code shard，不自动刷新 product shard；如需同步产品索引，在更新完成后手动运行 `/understand-product --shard <id>`

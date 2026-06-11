@@ -94,6 +94,5 @@ Domain nodes may have a `domainMeta` field with `entities`, `businessRules`, `cr
 2. **Understanding relationships**: Trace edges between nodes to explain dependencies, call chains, and data flow. Example: `jq '[.edges[] | select(.source == "file:src/app.ts")] | length' knowledge-graph.json`
 3. **Architecture overview**: Summarize layers and their contents. Example: `jq '.layers[] | {name, count: (.nodeIds | length)}' knowledge-graph.json`
 4. **Onboarding**: Walk through the tour steps to explain the codebase.
-5. **Dashboard**: Guide users to run `/understand-dashboard` to visualize the graph interactively. The dashboard supports toggling between Structural and Domain views.
-6. **Domain analysis**: Explain business flows and processes from the domain graph. Example: `jq '.nodes[] | select(.type == "flow")' domain-graph.json`
+5. **Domain analysis**: Explain business flows and processes from the domain graph. Example: `jq '.nodes[] | select(.type == "flow")' domain-graph.json`
 7. **Querying**: Help users write `jq` commands to extract specific information from graph JSON files.

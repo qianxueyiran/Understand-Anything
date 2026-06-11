@@ -119,14 +119,10 @@ Dispatch `article-analyzer` subagents to extract implicit knowledge:
    - "N edges (N wikilink, N categorized, N implicit)"
    - "N layers, N tour steps"
 
-7. Auto-trigger the dashboard:
-   ```
-   /understand-dashboard <TARGET_DIR>
-   ```
+7. Report the knowledge graph saved path and a summary: total articles, entities, topics, claims, sources, and edges.
 
 ## Notes
 
 - The parse script handles ALL deterministic extraction (wikilinks, headings, frontmatter, categories from index.md). The LLM agents only add implicit knowledge that requires inference.
 - Categories and taxonomy come from index.md section headings, NOT from filename prefixes. The Karpathy spec is intentionally abstract about naming conventions.
-- The graph uses `kind: "knowledge"` to signal the dashboard to use force-directed layout instead of hierarchical dagre.
 - Source nodes from raw/ are lightweight (filename + size only) — we don't parse PDFs or binary files.
